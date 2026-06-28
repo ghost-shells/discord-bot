@@ -484,7 +484,6 @@ class Tickets(commands.Cog):
         bot.loop.create_task(self._register_panel_views())
 
     async def _register_panel_views(self):
-	print(f"[tickets] Registering panel {panel['_id']} with {len(types)} types")
         await self.bot.wait_until_ready()
         db = self.bot.db
         if db is None:
