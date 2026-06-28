@@ -21,6 +21,7 @@ intents.guilds = True
 intents.reactions = True
 
 COGS = [
+    'cogs.tickets',
     'cogs.moderation',
     'cogs.giveaway',
     'cogs.sticky',
@@ -34,7 +35,7 @@ COGS = [
     'cogs.staff_utils',
     'cogs.afk',
     'cogs.mcpay',
-    'cogs.tickets',
+
 ]
 
 class Bot(commands.Bot):
