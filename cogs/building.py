@@ -6,7 +6,7 @@ from discord import app_commands
 from datetime import datetime, timedelta, timezone
 from bson import ObjectId
 from cogs.config import admin_only, get_guild_config
-from cogs.tickets_base import TicketView, _close_ticket
+from cogs.tickets import TicketView, _close_ticket
 import asyncio
 import aiohttp
 import os
