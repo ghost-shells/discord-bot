@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Servers</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <style>
+        body { display: block; height: auto; text-align: center; padding-top: 50px; }
+        h1 { color: var(--text-main); margin-bottom: 30px; }
+    </style>
+</head>
+<body>
+    <h1>Select a Server</h1>
+    <div class="grid">
+        {% for guild in guilds %}
+            <div class="server-card">
+                {% if guild.icon %}
+                <img class="server-icon" src="https://cdn.discordapp.com/icons/{{ guild.id }}/{{ guild.icon }}.png" alt="Icon">
+                {% else %}
+                <div class="server-icon">{{ guild.name[0] }}</div>
+                {% endif %}
+                <h3>{{ guild.name }}</h3>
+                <a href="/dashboard/{{ guild.id }}" class="manage-link">Manage Settings</a>
+            </div>
+        {% endfor %}
+    </div>
+</body>
+</html>

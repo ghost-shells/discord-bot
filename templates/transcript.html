@@ -1,0 +1,294 @@
+<!-- templates/transcript.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ticket Transcript - {{ channel_name }}</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+            background: #1e1f22;
+            color: #dbdee1;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+            background: #2b2d31;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+        }
+        
+        /* Header */
+        .header {
+            background: #1e1f22;
+            padding: 30px;
+            border-bottom: 1px solid #3f4147;
+            text-align: center;
+        }
+        
+        .header h1 {
+            font-size: 28px;
+            margin-bottom: 10px;
+            color: #5865F2;
+        }
+        
+        .header .ticket-id {
+            background: #313338;
+            display: inline-block;
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-family: monospace;
+            font-size: 14px;
+            margin-top: 10px;
+        }
+        
+        .info-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            padding: 20px 30px;
+            background: #1e1f22;
+            border-bottom: 1px solid #3f4147;
+        }
+        
+        .info-item {
+            text-align: center;
+        }
+        
+        .info-label {
+            font-size: 11px;
+            text-transform: uppercase;
+            color: #949ba4;
+            letter-spacing: 0.5px;
+            margin-bottom: 5px;
+        }
+        
+        .info-value {
+            font-size: 14px;
+            font-weight: 600;
+        }
+        
+        /* Messages */
+        .messages {
+            padding: 20px 30px;
+        }
+        
+        .message {
+            display: flex;
+            gap: 16px;
+            padding: 16px;
+            margin-bottom: 8px;
+            border-radius: 8px;
+            transition: background 0.2s;
+        }
+        
+        .message:hover {
+            background: #313338;
+        }
+        
+        .avatar {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: #5865F2;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            flex-shrink: 0;
+        }
+        
+        .avatar img {
+            width: 100%;
+            height: 100%;
+            border-radius: 50%;
+            object-fit: cover;
+        }
+        
+        .message-content {
+            flex: 1;
+        }
+        
+        .message-header {
+            display: flex;
+            align-items: baseline;
+            gap: 10px;
+            margin-bottom: 6px;
+            flex-wrap: wrap;
+        }
+        
+        .author-name {
+            font-weight: 600;
+            color: #dbdee1;
+        }
+        
+        .timestamp {
+            font-size: 11px;
+            color: #949ba4;
+        }
+        
+        .message-text {
+            font-size: 15px;
+            line-height: 1.4;
+            word-wrap: break-word;
+        }
+        
+        .message-text a {
+            color: #5865F2;
+            text-decoration: none;
+        }
+        
+        .message-text a:hover {
+            text-decoration: underline;
+        }
+        
+        .attachment {
+            background: #1e1f22;
+            padding: 8px 12px;
+            border-radius: 6px;
+            margin-top: 8px;
+            display: inline-block;
+            font-size: 13px;
+        }
+        
+        .attachment a {
+            color: #5865F2;
+            text-decoration: none;
+        }
+        
+        .system-message {
+            background: #313338;
+            opacity: 0.8;
+        }
+        
+        .system-message .message-text {
+            font-style: italic;
+            color: #949ba4;
+        }
+        
+        /* Footer */
+        .footer {
+            background: #1e1f22;
+            padding: 20px 30px;
+            text-align: center;
+            border-top: 1px solid #3f4147;
+            font-size: 12px;
+            color: #949ba4;
+        }
+        
+        /* Code blocks */
+        pre {
+            background: #1e1f22;
+            padding: 12px;
+            border-radius: 6px;
+            overflow-x: auto;
+            font-size: 13px;
+            margin-top: 8px;
+        }
+        
+        code {
+            font-family: 'Courier New', monospace;
+        }
+        
+        @media (max-width: 600px) {
+            .container {
+                border-radius: 0;
+            }
+            .messages {
+                padding: 12px;
+            }
+            .message {
+                padding: 10px;
+            }
+            .avatar {
+                width: 32px;
+                height: 32px;
+                font-size: 12px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>📑 Ticket Transcript</h1>
+            <div class="ticket-id">{{ channel_name }}</div>
+        </div>
+        
+        <div class="info-grid">
+            <div class="info-item">
+                <div class="info-label">Created By</div>
+                <div class="info-value">{{ creator_name }}</div>
+            </div>
+            <div class="info-item">
+                <div class="info-label">Category</div>
+                <div class="info-value">{{ category }}</div>
+            </div>
+            <div class="info-item">
+                <div class="info-label">Created At</div>
+                <div class="info-value">{{ created_at }}</div>
+            </div>
+            <div class="info-item">
+                <div class="info-label">Closed At</div>
+                <div class="info-value">{{ closed_at }}</div>
+            </div>
+            <div class="info-item">
+                <div class="info-label">Closed By</div>
+                <div class="info-value">{{ closed_by }}</div>
+            </div>
+            <div class="info-item">
+                <div class="info-label">Message Count</div>
+                <div class="info-value">{{ message_count }}</div>
+            </div>
+        </div>
+        
+        <div class="messages">
+            {% for message in messages %}
+            <div class="message {% if message.is_system %}system-message{% endif %}">
+                <div class="avatar">
+                    {% if message.avatar_url %}
+                    <img src="{{ message.avatar_url }}" alt="{{ message.author }}">
+                    {% else %}
+                    {{ message.author[:1] }}
+                    {% endif %}
+                </div>
+                <div class="message-content">
+                    <div class="message-header">
+                        <span class="author-name">{{ message.author }}</span>
+                        <span class="timestamp">{{ message.timestamp }}</span>
+                        {% if message.is_bot %}
+                        <span class="timestamp">🤖 Bot</span>
+                        {% endif %}
+                    </div>
+                    <div class="message-text">
+                        {{ message.content | safe }}
+                        {% if message.attachments %}
+                            <div class="attachment">
+                                📎 Attachments: 
+                                {% for att in message.attachments %}
+                                <a href="{{ att.url }}" target="_blank">{{ att.filename }}</a>{% if not loop.last %}, {% endif %}
+                                {% endfor %}
+                            </div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        
+        <div class="footer">
+            Generated on {{ generated_at }} • Ticket closed by {{ closed_by }}
+        </div>
+    </div>
+</body>
+</html>

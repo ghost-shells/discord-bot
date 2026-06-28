@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Transcripts - Bot Dashboard</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <style>
+        .transcripts-container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        .guild-section {
+            margin-bottom: 40px;
+        }
+        
+        .guild-header {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid var(--accent);
+        }
+        
+        .guild-icon {
+            width: 48px;
+            height: 48px;
+            border-radius: 50%;
+            background: var(--accent);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+            font-weight: bold;
+        }
+        
+        .guild-name {
+            font-size: 24px;
+            font-weight: bold;
+        }
+        
+        .transcript-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 16px 20px;
+            margin-bottom: 12px;
+            transition: all 0.2s;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 15px;
+        }
+        
+        .transcript-card:hover {
+            border-color: var(--accent);
+            transform: translateX(4px);
+        }
+        
+        .transcript-info {
+            flex: 1;
+        }
+        
+        .transcript-title {
+            font-size: 16px;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+        
+        .transcript-title .channel-name {
+            color: var(--accent);
+            font-family: monospace;
+        }
+        
+        .transcript-meta {
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+            font-size: 13px;
+            color: var(--text-muted);
+        }
+        
+        .transcript-meta span {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+        }
+        
+        .transcript-actions {
+            display: flex;
+            gap: 10px;
+        }
+        
+        .btn-sm {
+            padding: 8px 16px;
+            font-size: 13px;
+            margin: 0;
+        }
+        
+        .empty-state {
+            text-align: center;
+            padding: 40px;
+            color: var(--text-muted);
+            background: var(--bg-card);
+            border-radius: 8px;
+        }
+        
+        .search-bar {
+            margin-bottom: 20px;
+        }
+        
+        .search-bar input {
+            width: 100%;
+            max-width: 400px;
+            padding: 10px 15px;
+        }
+        
+        .badge {
+            background: var(--accent);
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 600;
+        }
+        
+        .info-box {
+            background: var(--bg-card);
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            border-left: 4px solid var(--accent);
+        }
+        
+        .info-box strong {
+            color: var(--accent);
+        }
+        
+        .info-box ul {
+            margin: 10px 0 0 20px;
+            color: var(--text-muted);
+        }
+        
+        .sidebar {
+            width: 240px;
+            background-color: var(--bg-sidebar);
+            padding: 20px 0;
+            display: flex;
+            flex-direction: column;
+            border-right: 1px solid var(--border);
+        }
+        .sidebar h2 {
+            padding: 0 20px 20px;
+            margin: 0;
+            border-bottom: 1px solid var(--border);
+            color: var(--text-main);
+            font-size: 16px;
+        }
+        .nav-item {
+            padding: 12px 20px;
+            cursor: pointer;
+            transition: 0.2s;
+            color: var(--text-muted);
+            font-weight: 500;
+            font-size: 14px;
+            border-left: 3px solid transparent;
+        }
+        .nav-item:hover {
+            background-color: var(--bg-main);
+            color: var(--text-main);
+        }
+        .content {
+            flex: 1;
+            padding: 40px;
+            overflow-y: auto;
+        }
+        body {
+            margin: 0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: var(--bg-main);
+            color: var(--text-main);
+            display: flex;
+            height: 100vh;
+            overflow: hidden;
+        }
+    </style>
+</head>
+<body>
+    <div class="sidebar">
+        <h2>📑 Transcripts</h2>
+        <div class="nav-item" onclick="window.location.href='/dashboard'">← Back to Servers</div>
+    </div>
+    
+    <div class="content">
+        <div class="transcripts-container">
+            <h1>📑 Ticket Transcripts</h1>
+            <p>View and download transcripts from closed tickets.</p>
+            
+            <div class="info-box">
+                <strong>📌 How Transcripts Work:</strong>
+                <ul>
+                    <li>When a ticket is closed, a summary is sent to the configured transcript channel</li>
+                    <li>The ticket creator receives a DM with a summary and link to view online</li>
+                    <li>Staff can view full transcripts online or download HTML files from this dashboard</li>
+                </ul>
+            </div>
+            
+            <div class="search-bar">
+                <input type="text" id="searchInput" placeholder="Search transcripts by channel name, creator, or category..." onkeyup="filterTranscripts()">
+            </div>
+            
+            {% if transcripts_by_guild %}
+                {% for guild_name, data in transcripts_by_guild.items() %}
+                <div class="guild-section" data-guild="{{ guild_name }}">
+                    <div class="guild-header">
+                        <div class="guild-icon">{{ guild_name[:1] }}</div>
+                        <div class="guild-name">{{ guild_name }}</div>
+                        <span class="badge">{{ data.transcripts|length }} transcripts</span>
+                    </div>
+                    
+                    {% for transcript in data.transcripts %}
+                    <div class="transcript-card" data-searchable="{{ transcript.channel_name }} {{ transcript.creator_name }} {{ transcript.category }}">
+                        <div class="transcript-info">
+                            <div class="transcript-title">
+                                📝 <span class="channel-name">{{ transcript.channel_name }}</span>
+                                {% if transcript.category != "Unknown" %}
+                                <span style="color: var(--text-muted);">· {{ transcript.category }}</span>
+                                {% endif %}
+                            </div>
+                            <div class="transcript-meta">
+                                <span>👤 Created by: <strong>{{ transcript.creator_name }}</strong></span>
+                                <span>🔒 Closed by: <strong>{{ transcript.closed_by }}</strong></span>
+                                <span>💬 {{ transcript.message_count }} messages</span>
+                                <span>📅 {{ transcript.closed_at.strftime('%Y-%m-%d %H:%M') }} UTC</span>
+                            </div>
+                        </div>
+                        <div class="transcript-actions">
+                            <a href="/transcripts/{{ transcript._id }}" target="_blank">
+                                <button class="btn-sm">👁️ View Online</button>
+                            </a>
+                            <a href="/transcripts/{{ transcript._id }}/raw">
+                                <button class="btn-sm">📥 Download HTML (Staff)</button>
+                            </a>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% endfor %}
+            {% else %}
+                <div class="empty-state">
+                    <p>📭 No transcripts found.</p>
+                    <p>When tickets are closed, transcripts will appear here.</p>
+                </div>
+            {% endif %}
+        </div>
+    </div>
+    
+    <script>
+        function filterTranscripts() {
+            const searchTerm = document.getElementById('searchInput').value.toLowerCase();
+            const cards = document.querySelectorAll('.transcript-card');
+            
+            cards.forEach(card => {
+                const searchable = card.dataset.searchable.toLowerCase();
+                if (searchable.includes(searchTerm)) {
+                    card.style.display = 'flex';
+                } else {
+                    card.style.display = 'none';
+                }
+            });
+            
+            // Hide empty guild sections
+            const guildSections = document.querySelectorAll('.guild-section');
+            guildSections.forEach(section => {
+                const visibleCards = section.querySelectorAll('.transcript-card[style="display: flex;"], .transcript-card:not([style])');
+                if (visibleCards.length === 0 && searchTerm !== '') {
+                    section.style.display = 'none';
+                } else {
+                    section.style.display = 'block';
+                }
+            });
+        }
+    </script>
+</body>
+</html>

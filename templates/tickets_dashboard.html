@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Ticket Manager – {{ guild_name }}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <style>
+    /* ── page layout ── */
+    .t-content { flex:1; overflow-y:auto; padding:36px 44px; background:var(--bg-base); background-image: radial-gradient(circle at 80% 10%, rgba(88,101,242,0.04) 0%, transparent 50%), radial-gradient(circle at 10% 90%, rgba(88,101,242,0.03) 0%, transparent 40%); }
+    .page-title { font-size:24px; font-weight:800; letter-spacing:-0.03em; color:var(--text-bright); margin-bottom:4px; }
+    .page-sub   { color:var(--text-muted); font-size:13px; margin-bottom:32px; }
+
+    /* ── two-column grid ── */
+    .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:24px; margin-bottom:32px; }
+    @media(max-width:960px){ .grid2{ grid-template-columns:1fr; } }
+
+    /* ── section panels ── */
+    .t-section { background:var(--bg-surface); border:1px solid var(--border); border-radius:var(--r-lg); padding:24px 26px; }
+    .t-section-head { display:flex; align-items:center; justify-content:space-between; margin-bottom:18px; }
+    .t-section-head h2 { font-size:15px; font-weight:700; color:var(--text-bright); letter-spacing:-0.01em; }
+
+    /* ── type/panel cards ── */
+    .t-card { background:var(--bg-overlay); border:1px solid var(--border); border-radius:var(--r-md); padding:14px 16px; margin-bottom:10px; transition:border-color var(--transition); }
+    .t-card:hover { border-color:rgba(255,255,255,0.1); }
+    .t-card-row { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; }
+    .t-card-title { font-weight:600; font-size:14px; color:var(--text-bright); margin-bottom:4px; }
+    .t-card-meta  { color:var(--text-muted); font-size:12px; line-height:1.6; }
+    .t-card-actions { display:flex; gap:6px; flex-shrink:0; }
+    .tag { display:inline-block; background:var(--accent-tint); border:1px solid rgba(88,101,242,0.25); color:var(--accent-light); font-size:11px; padding:2px 7px; border-radius:99px; margin:2px 2px 0 0; }
+
+    /* ── style badges ── */
+    .sbadge { display:inline-block; padding:2px 7px; border-radius:4px; font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; margin-left:6px; }
+    .sbadge-primary   { background:rgba(88,101,242,.2);  color:#8b95f7; }
+    .sbadge-secondary { background:rgba(90,96,112,.2);   color:#9da3af; }
+    .sbadge-success   { background:rgba(34,197,94,.15);  color:#4ade80; }
+    .sbadge-danger    { background:rgba(239,68,68,.15);  color:#f87171; }
+
+    /* ── form labels inside ticket page ── */
+    .t-label { display:block; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.07em; color:var(--text-muted); margin-top:14px; margin-bottom:6px; }
+    .t-label:first-child { margin-top:0; }
+    .color-row { display:flex; gap:8px; align-items:center; }
+    .color-row input[type=color] { width:42px; height:36px; padding:3px; border-radius:var(--r-sm); border:1px solid var(--border); background:var(--input-bg); cursor:pointer; }
+    .color-row input[type=text]  { flex:1; }
+    select[multiple] { min-height:96px; background-image:none; padding-right:13px; }
+
+    /* ── small buttons ── */
+    .btn-xs { padding:5px 11px; font-size:12px; margin-top:0; border-radius:var(--r-sm); font-weight:600; cursor:pointer; border:none; font-family:inherit; display:inline-flex; align-items:center; gap:5px; transition:background var(--transition), box-shadow var(--transition); }
+    .btn-xs-accent  { background:var(--accent); color:#fff; }
+    .btn-xs-accent:hover { background:var(--accent-mid); box-shadow:0 4px 14px var(--accent-glow); }
+    .btn-xs-ghost   { background:var(--bg-muted); color:var(--text-main); }
+    .btn-xs-ghost:hover { background:var(--bg-overlay); }
+    .btn-xs-danger  { background:transparent; color:var(--danger); border:1px solid rgba(239,68,68,.3); }
+    .btn-xs-danger:hover { background:var(--danger-tint); border-color:var(--danger); }
+
+    /* ── empty state ── */
+    .t-empty { text-align:center; color:var(--text-muted); padding:28px 0; font-size:13px; }
+
+    /* ── post modal ── */
+    .m-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,.65); z-index:200; align-items:center; justify-content:center; backdrop-filter:blur(3px); }
+    .m-overlay.open { display:flex; }
+    .m-box { background:var(--bg-surface); border:1px solid var(--border); border-radius:var(--r-lg); padding:28px; width:100%; max-width:420px; }
+    .m-box h3 { font-size:16px; font-weight:700; color:var(--text-bright); margin-bottom:18px; }
+    .m-footer { margin-top:20px; display:flex; gap:8px; justify-content:flex-end; }
+  </style>
+</head>
+<body>
+
+<!-- ── Sidebar ── -->
+<div class="sidebar">
+  <h2>🎫 Tickets</h2>
+  <a class="nav-item" href="/dashboard/{{ guild_id }}">← Back to Settings</a>
+  <a class="nav-item active" href="#">Ticket Types & Panels</a>
+</div>
+
+<!-- ── Main ── -->
+<div class="t-content">
+  <div class="page-title">🎫 Ticket Manager</div>
+  <p class="page-sub">{{ guild_name }} — build ticket types and post panels to your channels.</p>
+
+  <!-- TICKET TYPES -->
+  <div class="grid2">
+
+    <!-- List -->
+    <div class="t-section">
+      <div class="t-section-head">
+        <h2>📋 Ticket Types</h2>
+        <button class="btn-xs btn-xs-accent" onclick="openTypeForm(null)">+ New Type</button>
+      </div>
+
+      {% if ticket_types %}
+        {% for t in ticket_types %}
+        <div class="t-card">
+          <div class="t-card-row">
+            <div>
+              <div class="t-card-title">
+                {{ t.emoji }} {{ t.name }}
+                <span class="sbadge sbadge-{{ t.button_style }}">{{ t.button_style }}</span>
+              </div>
+              <div class="t-card-meta">
+                📁 {{ t.category }}&nbsp;&nbsp;|&nbsp;&nbsp;🔔 {{ t.ping_role or '—' }}&nbsp;&nbsp;|&nbsp;&nbsp;❓ {{ t.questions|length }} question(s)
+              </div>
+              <div style="margin-top:6px">
+                {% for r in t.allow_roles %}<span class="tag">{{ r }}</span>{% endfor %}
+              </div>
+            </div>
+            <div class="t-card-actions">
+              <button class="btn-xs btn-xs-ghost" onclick='openTypeForm({{ t | tojson }})'>Edit</button>
+              <form method="POST" style="display:inline" onsubmit="return confirm('Delete this ticket type?')">
+                <input type="hidden" name="form_type" value="delete_ticket_type">
+                <input type="hidden" name="type_id" value="{{ t._id }}">
+                <button class="btn-xs btn-xs-danger">Delete</button>
+              </form>
+            </div>
+          </div>
+        </div>
+        {% endfor %}
+      {% else %}
+        <div class="t-empty">No ticket types yet.<br>Create one using the form →</div>
+      {% endif %}
+    </div>
+
+    <!-- Create / Edit form -->
+    <div class="t-section">
+      <div class="t-section-head">
+        <h2 id="type-form-heading">✏️ New Ticket Type</h2>
+      </div>
+      <form method="POST" id="type-form">
+        <input type="hidden" name="form_type" value="save_ticket_type">
+        <input type="hidden" name="type_id"   id="f-type-id">
+
+        <label class="t-label">Name *</label>
+        <input type="text" name="name" id="f-name" placeholder="e.g. Bedrock Hole" required>
+
+        <label class="t-label">Emoji</label>
+        <input type="text" name="emoji" id="f-emoji" placeholder="🕳️" maxlength="4">
+
+        <label class="t-label">Button Style</label>
+        <select name="button_style" id="f-style">
+          <option value="primary">Primary (Blue)</option>
+          <option value="secondary">Secondary (Grey)</option>
+          <option value="success">Success (Green)</option>
+          <option value="danger">Danger (Red)</option>
+        </select>
+
+        <label class="t-label">Embed Color</label>
+        <div class="color-row">
+          <input type="color" id="f-color-pick" value="#5865f2" oninput="document.getElementById('f-color').value=this.value">
+          <input type="text"  name="color" id="f-color" value="#5865f2" maxlength="7" oninput="try{document.getElementById('f-color-pick').value=this.value}catch(e){}">
+        </div>
+
+        <label class="t-label">Discord Category (channel category name)</label>
+        <input type="text" name="category" id="f-category" placeholder="Leaves blank to use ticket name">
+
+        <label class="t-label">Ping Role</label>
+        <select name="ping_role" id="f-ping">
+          <option value="">— None —</option>
+          {% for r in roles %}<option value="{{ r.name }}">{{ r.name }}</option>{% endfor %}
+        </select>
+
+        <label class="t-label">Allow Roles (hold Ctrl/Cmd for multiple)</label>
+        <select name="allow_roles" id="f-allow" multiple>
+          {% for r in roles %}<option value="{{ r.name }}">{{ r.name }}</option>{% endfor %}
+        </select>
+
+        <label class="t-label">Question 1 *</label>
+        <input type="text" name="q0" id="f-q0" placeholder="Required" required>
+        <label class="t-label">Question 2</label>
+        <input type="text" name="q1" id="f-q1" placeholder="Optional">
+        <label class="t-label">Question 3</label>
+        <input type="text" name="q2" id="f-q2" placeholder="Optional">
+        <label class="t-label">Question 4</label>
+        <input type="text" name="q3" id="f-q3" placeholder="Optional">
+        <label class="t-label">Question 5</label>
+        <input type="text" name="q4" id="f-q4" placeholder="Optional">
+
+        <div style="margin-top:18px; display:flex; gap:8px;">
+          <button class="btn-xs btn-xs-accent" type="submit" style="padding:9px 18px; font-size:13px;">💾 Save Type</button>
+          <button class="btn-xs btn-xs-ghost"  type="button" onclick="openTypeForm(null)" style="padding:9px 14px; font-size:13px;">Clear</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <hr>
+
+  <!-- PANELS -->
+  <div class="grid2">
+
+    <!-- List -->
+    <div class="t-section">
+      <div class="t-section-head">
+        <h2>📌 Panels</h2>
+        <button class="btn-xs btn-xs-accent" onclick="openPanelForm(null)">+ New Panel</button>
+      </div>
+
+      {% if panels %}
+        {% for p in panels %}
+        <div class="t-card">
+          <div class="t-card-row">
+            <div>
+              <div class="t-card-title">{{ p.name }}</div>
+              <div class="t-card-meta">{{ p.assigned_types|length }} ticket type(s) assigned</div>
+              <div style="margin-top:6px">
+                {% for t in p.assigned_types %}<span class="tag">{{ t.emoji }} {{ t.name }}</span>{% endfor %}
+              </div>
+            </div>
+            <div class="t-card-actions">
+              <button class="btn-xs btn-xs-ghost"  onclick='openPanelForm({{ p | tojson }})'>Edit</button>
+              <button class="btn-xs btn-xs-accent" onclick="openPostModal('{{ p._id }}','{{ p.name }}')">Post</button>
+              <form method="POST" style="display:inline" onsubmit="return confirm('Delete this panel?')">
+                <input type="hidden" name="form_type" value="delete_panel">
+                <input type="hidden" name="panel_id"  value="{{ p._id }}">
+                <button class="btn-xs btn-xs-danger">Del</button>
+              </form>
+            </div>
+          </div>
+        </div>
+        {% endfor %}
+      {% else %}
+        <div class="t-empty">No panels yet.<br>Create one using the form →</div>
+      {% endif %}
+    </div>
+
+    <!-- Panel form -->
+    <div class="t-section">
+      <div class="t-section-head">
+        <h2 id="panel-form-heading">✏️ New Panel</h2>
+      </div>
+      <form method="POST" id="panel-form">
+        <input type="hidden" name="form_type" value="save_panel">
+        <input type="hidden" name="panel_id"  id="f-panel-id">
+
+        <label class="t-label">Panel Name * (used with /ticketpanel command)</label>
+        <input type="text" name="panel_name" id="f-panel-name" placeholder="e.g. Main Panel" required>
+
+        <label class="t-label">Embed Title</label>
+        <input type="text" name="panel_title" id="f-panel-title" placeholder="🎫 Open a Ticket">
+
+        <label class="t-label">Embed Description</label>
+        <textarea name="panel_desc" id="f-panel-desc" placeholder="Click a button below to open a ticket." style="min-height:70px"></textarea>
+
+        <label class="t-label">Embed Color</label>
+        <div class="color-row">
+          <input type="color" id="f-panel-color-pick" value="#5865f2" oninput="document.getElementById('f-panel-color').value=this.value">
+          <input type="text"  name="panel_color" id="f-panel-color" value="#5865f2" maxlength="7" oninput="try{document.getElementById('f-panel-color-pick').value=this.value}catch(e){}">
+        </div>
+
+        <label class="t-label">Ticket Types on this panel (hold Ctrl/Cmd for multiple, max 5)</label>
+        <select name="panel_type_ids" id="f-panel-types" multiple>
+          {% for t in ticket_types %}
+          <option value="{{ t._id }}">{{ t.emoji }} {{ t.name }}</option>
+          {% endfor %}
+        </select>
+
+        <div style="margin-top:18px; display:flex; gap:8px;">
+          <button class="btn-xs btn-xs-accent" type="submit" style="padding:9px 18px; font-size:13px;">💾 Save Panel</button>
+          <button class="btn-xs btn-xs-ghost"  type="button" onclick="openPanelForm(null)" style="padding:9px 14px; font-size:13px;">Clear</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- Post Modal -->
+<div class="m-overlay" id="post-modal">
+  <div class="m-box">
+    <h3 id="post-modal-title">Post Panel</h3>
+    <form method="POST" id="post-form">
+      <input type="hidden" name="form_type" value="post_panel">
+      <input type="hidden" name="panel_id"  id="post-panel-id">
+      <label class="t-label">Post to Channel</label>
+      <select name="channel_id" required>
+        {% for c in channels %}<option value="{{ c.id }}">#{{ c.name }}</option>{% endfor %}
+      </select>
+      <div class="m-footer">
+        <button class="btn-xs btn-xs-ghost" type="button" onclick="closePostModal()" style="padding:9px 14px;font-size:13px;">Cancel</button>
+        <button class="btn-xs btn-xs-accent" type="submit" style="padding:9px 18px;font-size:13px;">📤 Post</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+  function openTypeForm(t) {
+    document.getElementById('type-form-heading').textContent = t ? '✏️ Edit Ticket Type' : '✏️ New Ticket Type';
+    document.getElementById('f-type-id').value  = t ? t._id  : '';
+    document.getElementById('f-name').value     = t ? t.name : '';
+    document.getElementById('f-emoji').value    = t ? t.emoji : '';
+    document.getElementById('f-style').value    = t ? t.button_style : 'primary';
+    const col = t ? t.color_hex : '#5865f2';
+    document.getElementById('f-color').value      = col;
+    document.getElementById('f-color-pick').value = col;
+    document.getElementById('f-category').value = t ? t.category : '';
+    document.getElementById('f-ping').value     = t ? (t.ping_role || '') : '';
+    const qs = t ? (t.questions || []) : [];
+    for (let i = 0; i < 5; i++) document.getElementById(`f-q${i}`).value = qs[i] || '';
+    const sel = document.getElementById('f-allow');
+    const ar  = t ? (t.allow_roles || []) : [];
+    for (let o of sel.options) o.selected = ar.includes(o.value);
+  }
+
+  function openPanelForm(p) {
+    document.getElementById('panel-form-heading').textContent = p ? '✏️ Edit Panel' : '✏️ New Panel';
+    document.getElementById('f-panel-id').value    = p ? p._id : '';
+    document.getElementById('f-panel-name').value  = p ? p.name : '';
+    document.getElementById('f-panel-title').value = p ? (p.title || '') : '';
+    document.getElementById('f-panel-desc').value  = p ? (p.description || '') : '';
+    const col = p ? p.color_hex : '#5865f2';
+    document.getElementById('f-panel-color').value      = col;
+    document.getElementById('f-panel-color-pick').value = col;
+    const ids = p ? (p.ticket_type_ids || []) : [];
+    const sel = document.getElementById('f-panel-types');
+    for (let o of sel.options) o.selected = ids.includes(o.value);
+  }
+
+  function openPostModal(id, name) {
+    document.getElementById('post-panel-id').value           = id;
+    document.getElementById('post-modal-title').textContent  = `Post "${name}"`;
+    document.getElementById('post-modal').classList.add('open');
+  }
+  function closePostModal() {
+    document.getElementById('post-modal').classList.remove('open');
+  }
+  document.getElementById('post-modal').addEventListener('click', function(e) {
+    if (e.target === this) closePostModal();
+  });
+</script>
+</body>
+</html>

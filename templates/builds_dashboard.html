@@ -1,0 +1,680 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Build Tracker – {{ guild_name }}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <style>
+        :root {
+            --bg-main: #1e1f22;
+            --bg-card: #2b2d31;
+            --bg-sidebar: #313338;
+            --accent: #5865f2;
+            --green: #2ecc71;
+            --yellow: #f1c40f;
+            --red: #e74c3c;
+            --orange: #e67e22;
+            --text-main: #e4e5e7;
+            --text-muted: #949ba4;
+            --border: #404249;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            background: var(--bg-main);
+            color: var(--text-main);
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            display: flex;
+            height: 100vh;
+            overflow: hidden;
+        }
+        .sidebar {
+            width: 240px;
+            background: var(--bg-sidebar);
+            padding: 20px 0;
+            display: flex;
+            flex-direction: column;
+            border-right: 1px solid var(--border);
+            flex-shrink: 0;
+        }
+        .sidebar h2 {
+            padding: 0 20px 20px;
+            border-bottom: 1px solid var(--border);
+            font-size: 16px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .nav-item {
+            padding: 12px 20px;
+            cursor: pointer;
+            color: var(--text-muted);
+            font-weight: 500;
+            font-size: 14px;
+            border-left: 3px solid transparent;
+            transition: 0.2s;
+            text-decoration: none;
+            display: block;
+        }
+        .nav-item:hover { background: var(--bg-main); color: var(--text-main); }
+        .nav-item.active { background: var(--bg-main); color: var(--accent); border-left-color: var(--accent); }
+        .content { flex: 1; padding: 40px; overflow-y: auto; }
+        .page-header { margin-bottom: 30px; }
+        .page-header h1 { font-size: 26px; margin-bottom: 6px; }
+        .page-header p { color: var(--text-muted); font-size: 14px; }
+
+        /* Tabs */
+        .tabs { display: flex; gap: 4px; margin-bottom: 30px; border-bottom: 1px solid var(--border); }
+        .tab-btn {
+            padding: 10px 22px;
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            border-bottom: 3px solid transparent;
+            margin-bottom: -1px;
+            transition: 0.2s;
+        }
+        .tab-btn:hover { color: var(--text-main); }
+        .tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+        .tab-panel { display: none; }
+        .tab-panel.active { display: block; }
+
+        /* Stats row */
+        .stats-row { display: flex; gap: 16px; margin-bottom: 28px; flex-wrap: wrap; }
+        .stat-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 16px 24px;
+            flex: 1;
+            min-width: 130px;
+            text-align: center;
+        }
+        .stat-number { font-size: 30px; font-weight: 700; color: var(--accent); }
+        .stat-number.green { color: var(--green); }
+        .stat-number.yellow { color: var(--yellow); }
+        .stat-number.orange { color: var(--orange); }
+        .stat-label { font-size: 12px; color: var(--text-muted); margin-top: 4px; }
+
+        /* Order cards */
+        .orders-grid { display: flex; flex-direction: column; gap: 12px; }
+        .order-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 18px 22px;
+            display: grid;
+            grid-template-columns: auto 1fr auto auto auto;
+            align-items: center;
+            gap: 16px;
+            transition: border-color 0.2s;
+        }
+        .order-card:hover { border-color: var(--accent); }
+        .status-dot {
+            width: 12px; height: 12px;
+            border-radius: 50%;
+            flex-shrink: 0;
+        }
+        .status-dot.unpaid { background: var(--red); }
+        .status-dot.confirmed { background: var(--yellow); }
+        .status-dot.claimed { background: var(--green); }
+        .status-dot.completed { background: var(--text-muted); }
+        .status-dot.cancelled { background: var(--red); opacity: 0.4; }
+        .order-info { min-width: 0; }
+        .order-title { font-weight: 600; font-size: 15px; margin-bottom: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .order-meta { font-size: 12px; color: var(--text-muted); display: flex; gap: 14px; flex-wrap: wrap; }
+        .order-meta span { display: flex; align-items: center; gap: 4px; }
+        .status-badge {
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+            white-space: nowrap;
+        }
+        .badge-unpaid { background: rgba(231,76,60,0.2); color: var(--red); }
+        .badge-confirmed { background: rgba(241,196,15,0.2); color: var(--yellow); }
+        .badge-claimed { background: rgba(46,204,113,0.2); color: var(--green); }
+        .badge-completed { background: rgba(149,165,166,0.15); color: var(--text-muted); }
+        .badge-cancelled { background: rgba(231,76,60,0.1); color: #c0392b; }
+        .order-price {
+            font-size: 15px;
+            font-weight: 700;
+            color: var(--green);
+            white-space: nowrap;
+        }
+
+        /* Delete button */
+        .delete-btn {
+            background: none;
+            border: 1px solid rgba(231,76,60,0.3);
+            color: rgba(231,76,60,0.6);
+            width: 30px;
+            height: 30px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: 0.2s;
+            flex-shrink: 0;
+        }
+        .delete-btn:hover { background: rgba(231,76,60,0.15); border-color: var(--red); color: var(--red); }
+
+        /* Confirm modal */
+        .modal-overlay {
+            display: none;
+            position: fixed; inset: 0;
+            background: rgba(0,0,0,0.6);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+        }
+        .modal-overlay.open { display: flex; }
+        .modal {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 30px;
+            max-width: 420px;
+            width: 90%;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+        }
+        .modal h3 { font-size: 18px; margin-bottom: 10px; }
+        .modal p { color: var(--text-muted); font-size: 14px; margin-bottom: 24px; line-height: 1.5; }
+        .modal-order-name {
+            color: var(--text-main);
+            font-weight: 600;
+        }
+        .modal-actions { display: flex; gap: 10px; justify-content: flex-end; }
+        .btn-cancel-modal {
+            padding: 9px 20px;
+            background: none;
+            border: 1px solid var(--border);
+            color: var(--text-muted);
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: 0.2s;
+        }
+        .btn-cancel-modal:hover { border-color: var(--text-muted); color: var(--text-main); }
+        .btn-confirm-delete {
+            padding: 9px 20px;
+            background: var(--red);
+            border: none;
+            color: white;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            transition: 0.2s;
+        }
+        .btn-confirm-delete:hover { background: #c0392b; }
+        .btn-confirm-delete:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        /* Filter bar */
+        .filter-bar { display: flex; gap: 10px; margin-bottom: 20px; flex-wrap: wrap; align-items: center; }
+        .filter-bar input {
+            flex: 1; min-width: 200px;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 9px 14px;
+            color: var(--text-main);
+            font-size: 13px;
+        }
+        .filter-bar input:focus { outline: none; border-color: var(--accent); }
+        .filter-chip {
+            padding: 6px 14px;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            cursor: pointer;
+            font-size: 12px;
+            color: var(--text-muted);
+            transition: 0.2s;
+        }
+        .filter-chip:hover { color: var(--text-main); }
+        .filter-chip.active { background: var(--accent); border-color: var(--accent); color: white; }
+
+        /* Builder leaderboard */
+        .builders-grid { display: flex; flex-direction: column; gap: 12px; }
+        .builder-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 18px 22px;
+            display: grid;
+            grid-template-columns: 40px 1fr repeat(4, auto);
+            align-items: center;
+            gap: 16px;
+            transition: border-color 0.2s;
+        }
+        .builder-card:hover { border-color: var(--accent); }
+        .builder-rank {
+            font-size: 18px;
+            font-weight: 700;
+            color: var(--text-muted);
+            text-align: center;
+        }
+        .builder-rank.top1 { color: #f1c40f; }
+        .builder-rank.top2 { color: #bdc3c7; }
+        .builder-rank.top3 { color: #e67e22; }
+        .builder-info { min-width: 0; }
+        .builder-name { font-weight: 600; font-size: 15px; margin-bottom: 3px; }
+        .builder-since { font-size: 11px; color: var(--text-muted); }
+        .builder-stat { text-align: center; min-width: 70px; }
+        .builder-stat-num { font-size: 20px; font-weight: 700; }
+        .builder-stat-num.green { color: var(--green); }
+        .builder-stat-num.yellow { color: var(--yellow); }
+        .builder-stat-num.accent { color: var(--accent); }
+        .builder-stat-label { font-size: 10px; color: var(--text-muted); margin-top: 2px; text-transform: uppercase; letter-spacing: 0.5px; }
+        .builder-expand-btn {
+            background: none;
+            border: 1px solid var(--border);
+            color: var(--text-muted);
+            padding: 5px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 12px;
+            transition: 0.2s;
+            white-space: nowrap;
+        }
+        .builder-expand-btn:hover { border-color: var(--accent); color: var(--accent); }
+        .builder-history {
+            display: none;
+            grid-column: 1 / -1;
+            margin-top: 8px;
+            padding-top: 16px;
+            border-top: 1px solid var(--border);
+        }
+        .builder-history.open { display: block; }
+        .history-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        .history-table th {
+            text-align: left;
+            padding: 8px 12px;
+            color: var(--text-muted);
+            font-weight: 600;
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            border-bottom: 1px solid var(--border);
+        }
+        .history-table td { padding: 8px 12px; border-bottom: 1px solid rgba(64,66,73,0.5); }
+        .history-table tr:last-child td { border-bottom: none; }
+
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: var(--text-muted);
+        }
+        .empty-state .emoji { font-size: 48px; margin-bottom: 12px; }
+        .empty-state p { font-size: 15px; }
+
+        /* Toast */
+        .toast {
+            position: fixed; bottom: 30px; right: 30px;
+            padding: 12px 24px; border-radius: 8px;
+            z-index: 2000; color: white; font-weight: 500;
+            animation: slideIn 0.3s ease;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+        }
+        .toast.success { background: var(--green); }
+        .toast.error { background: var(--red); }
+        @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+
+        @media (max-width: 768px) {
+            .order-card { grid-template-columns: auto 1fr auto; }
+            .order-price, .status-badge { grid-column: 2; }
+            .builder-card { grid-template-columns: 40px 1fr; }
+            .builder-stat { display: none; }
+        }
+    </style>
+</head>
+<body>
+<div class="sidebar">
+    <h2>{{ guild_name }}</h2>
+    <a class="nav-item" href="/dashboard/{{ guild_id }}">← Back to Settings</a>
+    <a class="nav-item" href="/dashboard/{{ guild_id }}/commands">🔑 Command Permissions</a>
+    <a class="nav-item active" href="/dashboard/{{ guild_id }}/builds">🏗️ Build Tracker</a>
+    <a class="nav-item" href="/transcripts">📑 Transcripts</a>
+</div>
+
+<div class="content">
+    <div class="page-header">
+        <h1>🏗️ Build Tracker</h1>
+        <p>Monitor active orders and builder performance stats.</p>
+    </div>
+
+    <div class="tabs">
+        <button class="tab-btn active" onclick="switchTab('orders', this)">📋 Active Orders</button>
+        <button class="tab-btn" onclick="switchTab('history', this)">📜 Order History</button>
+        <button class="tab-btn" onclick="switchTab('builders', this)">👷 Builder Stats</button>
+    </div>
+
+    <!-- ===== ACTIVE ORDERS TAB ===== -->
+    <div id="tab-orders" class="tab-panel active">
+        <div class="stats-row">
+            <div class="stat-card">
+                <div class="stat-number" id="stat-total">{{ active_orders | length }}</div>
+                <div class="stat-label">Active Orders</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number yellow" id="stat-unpaid">{{ active_orders | selectattr('status', 'equalto', 'unpaid') | list | length }}</div>
+                <div class="stat-label">Awaiting Payment</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number orange" id="stat-confirmed">{{ active_orders | selectattr('status', 'equalto', 'confirmed') | list | length }}</div>
+                <div class="stat-label">Paid, Unclaimed</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number green" id="stat-claimed">{{ active_orders | selectattr('status', 'equalto', 'claimed') | list | length }}</div>
+                <div class="stat-label">In Progress</div>
+            </div>
+        </div>
+
+        <div class="filter-bar">
+            <input type="text" id="orderSearch" placeholder="🔍 Search by buyer, IGN, build..." oninput="filterOrders()">
+            <span class="filter-chip active" data-status="all" onclick="setStatusFilter(this)">All</span>
+            <span class="filter-chip" data-status="unpaid" onclick="setStatusFilter(this)">⏳ Unpaid</span>
+            <span class="filter-chip" data-status="confirmed" onclick="setStatusFilter(this)">💰 Paid</span>
+            <span class="filter-chip" data-status="claimed" onclick="setStatusFilter(this)">🔨 In Progress</span>
+        </div>
+
+        <div class="orders-grid" id="activeOrdersList">
+            {% if active_orders %}
+                {% for order in active_orders %}
+                <div class="order-card" data-status="{{ order.status }}"
+                     data-search="{{ order.buyer_name | lower }} {{ order.ign | lower }} {{ order.build_name | lower }} {{ order.region | lower }}">
+                    <div class="status-dot {{ order.status }}"></div>
+                    <div class="order-info">
+                        <div class="order-title">{{ order.build_name }} — {{ order.buyer_name }}</div>
+                        <div class="order-meta">
+                            <span>🎮 {{ order.ign }}</span>
+                            <span>🌍 {{ order.region }}</span>
+                            <span>🌾 {{ order.farm_name }}</span>
+                            {% if order.builder_name %}<span>🔨 {{ order.builder_name }}</span>{% endif %}
+                            <span>🕐 {{ order.created_at }}</span>
+                        </div>
+                    </div>
+                    <span class="status-badge badge-{{ order.status }}">{{ order.status }}</span>
+                    <div class="order-price">{{ order.price }}</div>
+                    <button class="delete-btn" title="Delete order"
+                            onclick="confirmDelete('{{ order._id }}', '{{ order.build_name }} — {{ order.buyer_name }}', this)">🗑️</button>
+                </div>
+                {% endfor %}
+            {% else %}
+                <div class="empty-state">
+                    <div class="emoji">✅</div>
+                    <p>No active orders right now.</p>
+                </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- ===== HISTORY TAB ===== -->
+    <div id="tab-history" class="tab-panel">
+        <div class="stats-row">
+            <div class="stat-card">
+                <div class="stat-number green">{{ completed_orders | length }}</div>
+                <div class="stat-label">Completed</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number" style="color:var(--red)">{{ cancelled_orders | length }}</div>
+                <div class="stat-label">Cancelled</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number accent">{{ (completed_orders | length) + (cancelled_orders | length) }}</div>
+                <div class="stat-label">Total Closed</div>
+            </div>
+        </div>
+
+        <div class="filter-bar">
+            <input type="text" id="historySearch" placeholder="🔍 Search history..." oninput="filterHistory()">
+            <span class="filter-chip active" data-hstatus="all" onclick="setHistoryFilter(this)">All</span>
+            <span class="filter-chip" data-hstatus="completed" onclick="setHistoryFilter(this)">✅ Completed</span>
+            <span class="filter-chip" data-hstatus="cancelled" onclick="setHistoryFilter(this)">❌ Cancelled</span>
+        </div>
+
+        <div class="orders-grid" id="historyOrdersList">
+            {% set closed_orders = completed_orders + cancelled_orders %}
+            {% if closed_orders %}
+                {% for order in closed_orders | sort(attribute='created_at', reverse=True) %}
+                <div class="order-card" data-hstatus="{{ order.status }}"
+                     data-hsearch="{{ order.buyer_name | lower }} {{ order.ign | lower }} {{ order.build_name | lower }}">
+                    <div class="status-dot {{ order.status }}"></div>
+                    <div class="order-info">
+                        <div class="order-title">{{ order.build_name }} — {{ order.buyer_name }}</div>
+                        <div class="order-meta">
+                            <span>🎮 {{ order.ign }}</span>
+                            <span>🌍 {{ order.region }}</span>
+                            {% if order.builder_name %}<span>🔨 {{ order.builder_name }}</span>{% endif %}
+                            <span>🕐 {{ order.created_at }}</span>
+                        </div>
+                    </div>
+                    <span class="status-badge badge-{{ order.status }}">{{ order.status }}</span>
+                    <div class="order-price">{{ order.price }}</div>
+                    <button class="delete-btn" title="Delete order"
+                            onclick="confirmDelete('{{ order._id }}', '{{ order.build_name }} — {{ order.buyer_name }}', this)">🗑️</button>
+                </div>
+                {% endfor %}
+            {% else %}
+                <div class="empty-state">
+                    <div class="emoji">📭</div>
+                    <p>No closed orders yet.</p>
+                </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- ===== BUILDER STATS TAB ===== -->
+    <div id="tab-builders" class="tab-panel">
+        <div class="stats-row">
+            <div class="stat-card">
+                <div class="stat-number">{{ builder_stats | length }}</div>
+                <div class="stat-label">Total Builders</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number green">{{ builder_stats | sum(attribute='completed') }}</div>
+                <div class="stat-label">Builds Completed</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number yellow">{{ builder_stats | sum(attribute='active') }}</div>
+                <div class="stat-label">Currently Active</div>
+            </div>
+        </div>
+
+        <div class="builders-grid" id="buildersList">
+            {% if builder_stats %}
+                {% for builder in builder_stats | sort(attribute='completed', reverse=True) %}
+                <div class="builder-card" id="builder-{{ loop.index }}">
+                    <div class="builder-rank {% if loop.index == 1 %}top1{% elif loop.index == 2 %}top2{% elif loop.index == 3 %}top3{% endif %}">
+                        #{{ loop.index }}
+                    </div>
+                    <div class="builder-info">
+                        <div class="builder-name">{{ builder.name }}</div>
+                        <div class="builder-since">First build: {{ builder.first_build }}</div>
+                    </div>
+                    <div class="builder-stat">
+                        <div class="builder-stat-num green">{{ builder.completed }}</div>
+                        <div class="builder-stat-label">Completed</div>
+                    </div>
+                    <div class="builder-stat">
+                        <div class="builder-stat-num yellow">{{ builder.active }}</div>
+                        <div class="builder-stat-label">Active</div>
+                    </div>
+                    <div class="builder-stat">
+                        <div class="builder-stat-num" style="color:var(--red)">{{ builder.cancelled }}</div>
+                        <div class="builder-stat-label">Cancelled</div>
+                    </div>
+                    <button class="builder-expand-btn" onclick="toggleBuilderHistory({{ loop.index }})">
+                        📋 History
+                    </button>
+                    <div class="builder-history" id="bhistory-{{ loop.index }}">
+                        {% if builder.orders %}
+                        <table class="history-table">
+                            <thead>
+                                <tr>
+                                    <th>Build</th>
+                                    <th>Buyer IGN</th>
+                                    <th>Region</th>
+                                    <th>Price</th>
+                                    <th>Status</th>
+                                    <th>Date</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for o in builder.orders | sort(attribute='created_at', reverse=True) %}
+                                <tr>
+                                    <td>{{ o.build_name }}</td>
+                                    <td>{{ o.ign }}</td>
+                                    <td>{{ o.region }}</td>
+                                    <td>{{ o.price }}</td>
+                                    <td><span class="status-badge badge-{{ o.status }}">{{ o.status }}</span></td>
+                                    <td>{{ o.created_at }}</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                        {% else %}
+                        <p style="color:var(--text-muted); font-size:13px; padding: 8px 0;">No order history yet.</p>
+                        {% endif %}
+                    </div>
+                </div>
+                {% endfor %}
+            {% else %}
+                <div class="empty-state">
+                    <div class="emoji">👷</div>
+                    <p>No builder stats yet. Stats are tracked once builders claim orders.</p>
+                </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<!-- ===== DELETE CONFIRM MODAL ===== -->
+<div class="modal-overlay" id="deleteModal">
+    <div class="modal">
+        <h3>🗑️ Delete Order</h3>
+        <p>Are you sure you want to permanently delete <span class="modal-order-name" id="modalOrderName"></span>? This cannot be undone.</p>
+        <div class="modal-actions">
+            <button class="btn-cancel-modal" onclick="closeModal()">Cancel</button>
+            <button class="btn-confirm-delete" id="confirmDeleteBtn" onclick="doDelete()">Delete</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    function switchTab(name, btn) {
+        document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+        document.getElementById('tab-' + name).classList.add('active');
+        btn.classList.add('active');
+    }
+
+    let activeStatusFilter = 'all';
+    function setStatusFilter(chip) {
+        document.querySelectorAll('[data-status]').forEach(c => c.classList.remove('active'));
+        chip.classList.add('active');
+        activeStatusFilter = chip.dataset.status;
+        filterOrders();
+    }
+    function filterOrders() {
+        const q = document.getElementById('orderSearch').value.toLowerCase();
+        document.querySelectorAll('#activeOrdersList .order-card').forEach(card => {
+            const matchStatus = activeStatusFilter === 'all' || card.dataset.status === activeStatusFilter;
+            const matchSearch = card.dataset.search.includes(q);
+            card.style.display = matchStatus && matchSearch ? '' : 'none';
+        });
+    }
+
+    let historyStatusFilter = 'all';
+    function setHistoryFilter(chip) {
+        document.querySelectorAll('[data-hstatus]').forEach(c => c.classList.remove('active'));
+        chip.classList.add('active');
+        historyStatusFilter = chip.dataset.hstatus;
+        filterHistory();
+    }
+    function filterHistory() {
+        const q = document.getElementById('historySearch').value.toLowerCase();
+        document.querySelectorAll('#historyOrdersList .order-card').forEach(card => {
+            const matchStatus = historyStatusFilter === 'all' || card.dataset.hstatus === historyStatusFilter;
+            const matchSearch = card.dataset.hsearch.includes(q);
+            card.style.display = matchStatus && matchSearch ? '' : 'none';
+        });
+    }
+
+    function toggleBuilderHistory(idx) {
+        const el = document.getElementById('bhistory-' + idx);
+        el.classList.toggle('open');
+    }
+
+    // ---- Delete logic ----
+    let pendingDeleteId = null;
+    let pendingDeleteCard = null;
+
+    function confirmDelete(orderId, orderName, btn) {
+        pendingDeleteId = orderId;
+        pendingDeleteCard = btn.closest('.order-card');
+        document.getElementById('modalOrderName').textContent = orderName;
+        document.getElementById('deleteModal').classList.add('open');
+    }
+
+    function closeModal() {
+        document.getElementById('deleteModal').classList.remove('open');
+        pendingDeleteId = null;
+        pendingDeleteCard = null;
+    }
+
+    async function doDelete() {
+        if (!pendingDeleteId) return;
+        const btn = document.getElementById('confirmDeleteBtn');
+        btn.disabled = true;
+        btn.textContent = 'Deleting...';
+
+        try {
+            const res = await fetch(`/dashboard/{{ guild_id }}/builds/delete`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ order_id: pendingDeleteId })
+            });
+            const data = await res.json();
+            if (res.ok && data.success) {
+                pendingDeleteCard.style.transition = 'opacity 0.3s';
+                pendingDeleteCard.style.opacity = '0';
+                setTimeout(() => pendingDeleteCard.remove(), 300);
+                showToast('Order deleted.', 'success');
+            } else {
+                showToast(data.error || 'Failed to delete.', 'error');
+            }
+        } catch (e) {
+            showToast('Network error.', 'error');
+        }
+
+        btn.disabled = false;
+        btn.textContent = 'Delete';
+        closeModal();
+    }
+
+    // Close modal on overlay click
+    document.getElementById('deleteModal').addEventListener('click', function(e) {
+        if (e.target === this) closeModal();
+    });
+
+    function showToast(msg, type) {
+        const t = document.createElement('div');
+        t.className = `toast ${type}`;
+        t.textContent = msg;
+        document.body.appendChild(t);
+        setTimeout(() => t.remove(), 3000);
+    }
+
+    // Auto-refresh active orders every 30s
+    setTimeout(() => location.reload(), 30000);
+</script>
+</body>
+</html>

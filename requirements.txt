@@ -1,0 +1,6 @@
+discord.py>=2.3.0
+python-dotenv>=1.0.0
+pymongo[srv]
+Flask
+requests
+jinja2
