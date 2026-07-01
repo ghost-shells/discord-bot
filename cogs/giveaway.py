@@ -5,7 +5,9 @@ import asyncio
 from datetime import datetime, timedelta, timezone
 import random
 from typing import Optional, List
-from cogs.config import admin_only, get_guild_config
+from cogs.config import admin_only, is_admin_user, is_staff_user, get_guild_config, TICKET_PREFIXES
+from cogs.tickets import TicketView
+
 
 # ---------------------------------------------------------------------------
 # Helper
@@ -18,6 +20,21 @@ def ensure_aware(dt: datetime) -> datetime:
     if dt.tzinfo is None:
         return dt.replace(tzinfo=timezone.utc)
     return dt
+
+
+def is_claim_ticket(channel: discord.abc.GuildChannel) -> bool:
+    """True if this channel is a prize-claim ticket created by WinnerClaimView."""
+    name = getattr(channel, "name", "")
+    return name.startswith("claim-")
+
+
+def get_claim_winner(channel: discord.TextChannel) -> Optional[discord.Member]:
+    """The winner is the only Member (as opposed to Role) with an explicit
+    permission overwrite on a claim ticket — see WinnerClaimView.create_claim_ticket."""
+    for target, _overwrite in channel.overwrites.items():
+        if isinstance(target, discord.Member):
+            return target
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -59,6 +76,51 @@ class GiveawayData:
             self.db["giveaways"].delete_one({"message_id": message_id})
         except Exception as e:
             print(f"❌ Failed to remove giveaway from DB: {e}")
+
+
+# ---------------------------------------------------------------------------
+# Sponsor persistence (MongoDB) — tracks who is paying out a prize claim
+# ---------------------------------------------------------------------------
+
+class GiveawaySponsors:
+    """One sponsor per claim ticket channel. Sponsor is responsible for
+    paying out the giveaway winner in that ticket."""
+
+    def __init__(self, db):
+        self.db = db
+
+    def get(self, channel_id: int) -> Optional[dict]:
+        if self.db is None:
+            return None
+        try:
+            return self.db["giveaway_sponsors"].find_one({"channel_id": channel_id})
+        except Exception as e:
+            print(f"❌ Failed to fetch sponsor: {e}")
+            return None
+
+    def set(self, channel_id: int, guild_id: int, sponsor_id: int) -> bool:
+        if self.db is None:
+            return False
+        try:
+            self.db["giveaway_sponsors"].update_one(
+                {"channel_id": channel_id},
+                {"$set": {"channel_id": channel_id, "guild_id": guild_id, "sponsor_id": sponsor_id}},
+                upsert=True,
+            )
+            return True
+        except Exception as e:
+            print(f"❌ Failed to set sponsor: {e}")
+            return False
+
+    def remove(self, channel_id: int) -> bool:
+        if self.db is None:
+            return False
+        try:
+            self.db["giveaway_sponsors"].delete_one({"channel_id": channel_id})
+            return True
+        except Exception as e:
+            print(f"❌ Failed to remove sponsor: {e}")
+            return False
 
 
 # ---------------------------------------------------------------------------
@@ -144,6 +206,39 @@ class Giveaway:
 
 
 # ---------------------------------------------------------------------------
+# Claim IGN Modal
+# ---------------------------------------------------------------------------
+
+class ClaimIGNModal(discord.ui.Modal, title="Claim Your Prize"):
+    mc_ign = discord.ui.TextInput(
+        label="What is your Minecraft IGN?",
+        placeholder="e.g. Notch",
+        required=True,
+        max_length=32,
+    )
+
+    def __init__(self, claim_view: "WinnerClaimView"):
+        super().__init__()
+        self.claim_view = claim_view
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        await self.claim_view.create_claim_ticket(
+            interaction, interaction.user.id, mc_ign=str(self.mc_ign.value).strip()
+        )
+
+    async def on_error(self, interaction: discord.Interaction, error: Exception):
+        print(f"ClaimIGNModal error: {error}")
+        try:
+            if interaction.response.is_done():
+                await interaction.followup.send("❌ Something went wrong submitting your claim.", ephemeral=True)
+            else:
+                await interaction.response.send_message("❌ Something went wrong submitting your claim.", ephemeral=True)
+        except discord.HTTPException:
+            pass
+
+
+# ---------------------------------------------------------------------------
 # Winner Claim View
 # ---------------------------------------------------------------------------
 
@@ -209,15 +304,17 @@ class WinnerClaimView(discord.ui.View):
             await interaction.response.send_message("❌ You already claimed your prize!", ephemeral=True)
             return
 
-        await self.create_claim_ticket(interaction, interaction.user.id)
+        # Open the IGN modal instead of creating the ticket immediately
+        modal = ClaimIGNModal(claim_view=self)
+        await interaction.response.send_modal(modal)
 
-    async def create_claim_ticket(self, interaction: discord.Interaction, winner_id: int):
+    async def create_claim_ticket(self, interaction: discord.Interaction, winner_id: int, mc_ign: str = None):
         guild = interaction.guild
         uname = interaction.user.name.lower()
 
         for channel in guild.text_channels:
             if channel.name == f"claim-{uname}":
-                await interaction.response.send_message(
+                await interaction.followup.send(
                     f"❌ You already have an open claim ticket: {channel.mention}", ephemeral=True,
                 )
                 return
@@ -227,11 +324,13 @@ class WinnerClaimView(discord.ui.View):
             claim_category = await guild.create_category("Claim Tickets")
             await claim_category.set_permissions(guild.default_role, read_messages=False)
 
+        # Winner can read/see the ticket and attach proof if needed, but cannot send
+        # messages until staff take over and grant permission.
         overwrites = {
             guild.default_role: discord.PermissionOverwrite(read_messages=False),
             interaction.user: discord.PermissionOverwrite(
-                read_messages=True, send_messages=True,
-                read_message_history=True, attach_files=True,
+                read_messages=True, send_messages=False,
+                read_message_history=True, attach_files=False,
             ),
         }
 
@@ -260,6 +359,7 @@ class WinnerClaimView(discord.ui.View):
             description=(
                 f"### Welcome {interaction.user.mention}!\n\n"
                 f"**Prize:** {self.prize}\n\n"
+                f"**Minecraft IGN:** {mc_ign}\n\n"
                 f"🔗 **Proof/Original Giveaway:** [Click Here]({giveaway_link})\n\n"
                 f"Please wait for staff to process your claim.\n\n"
                 f"━━━━━━━━━━━━━━━━━━"
@@ -269,11 +369,12 @@ class WinnerClaimView(discord.ui.View):
         )
         embed.add_field(name="Claimed By", value=interaction.user.mention, inline=True)
         embed.add_field(name="Category",   value="Prize Claim",            inline=True)
+        embed.add_field(name="Minecraft IGN", value=mc_ign or "N/A",       inline=True)
         embed.set_footer(text=f"Channel ID: {ticket.id}")
         if guild.icon:
             embed.set_thumbnail(url=guild.icon.url)
 
-        from cogs.tickets_base import TicketView
+        
         view = TicketView()
         await ticket.send(embed=embed, view=view)
 
@@ -290,7 +391,7 @@ class WinnerClaimView(discord.ui.View):
             giveaway_obj.claimed_users.add(winner_id)
             self.giveaway_data.add_giveaway(self.giveaway_message_id, giveaway_obj)
 
-        await interaction.response.send_message(
+        await interaction.followup.send(
             f"✅ Claim ticket created: {ticket.mention}", ephemeral=True
         )
 
@@ -352,6 +453,7 @@ class Giveaways(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.giveaway_data = GiveawayData(self.bot.db)
+        self.sponsors = GiveawaySponsors(self.bot.db)
 
         for msg_id, giveaway in self.giveaway_data.active_giveaways.items():
             if not giveaway.ended:
@@ -495,7 +597,9 @@ class Giveaways(commands.Cog):
     # Slash Commands (NOW USING DASHBOARD AWARE @admin_only())
     # ------------------------------------------------------------------
 
-    @app_commands.command(name="giveaway", description="Create a new giveaway")
+    giveaway_group = app_commands.Group(name="giveaway", description="Giveaway management commands")
+
+    @giveaway_group.command(name="create", description="Create a new giveaway")
     @app_commands.describe(
         channel="Channel to post the giveaway", title="Title of the giveaway", description="Description of the giveaway",
         prize="What users can win", winners="Number of winners", duration_minutes="Minutes until giveaway ends",
@@ -560,7 +664,131 @@ class Giveaways(commands.Cog):
             content=f"✅ Giveaway created in {channel.mention}!"
         )
 
-    @app_commands.command(name="endgiveaway", description="Force end a giveaway early")
+    @giveaway_group.command(name="sponsor", description="Become the sponsor responsible for paying out this prize claim")
+    async def giveaway_sponsor(self, interaction: discord.Interaction):
+        if not is_claim_ticket(interaction.channel):
+            await interaction.response.send_message(
+                "❌ This command can only be used inside a prize claim ticket.", ephemeral=True
+            )
+            return
+
+        if not is_staff_user(interaction):
+            await interaction.response.send_message(
+                "❌ You need the Staff role to sponsor a prize claim.", ephemeral=True
+            )
+            return
+
+        existing = self.sponsors.get(interaction.channel.id)
+        if existing:
+            sponsor_id = existing["sponsor_id"]
+            if sponsor_id == interaction.user.id:
+                await interaction.response.send_message(
+                    "❌ You are already the sponsor of this claim!", ephemeral=True
+                )
+            else:
+                await interaction.response.send_message(
+                    f"❌ This claim already has a sponsor: <@{sponsor_id}>. "
+                    f"They (or an admin) must use `/giveaway unsponsor` before someone else can sponsor it.",
+                    ephemeral=True,
+                )
+            return
+
+        self.sponsors.set(interaction.channel.id, interaction.guild.id, interaction.user.id)
+
+        embed = discord.Embed(
+            title="💰 Sponsor Assigned",
+            description=f"{interaction.user.mention} will be paying out this prize to the winner.",
+            color=discord.Color.gold(),
+            timestamp=datetime.now(timezone.utc),
+        )
+        await interaction.response.send_message(embed=embed)
+
+    @giveaway_group.command(name="unsponsor", description="Remove the current sponsor from this prize claim")
+    async def giveaway_unsponsor(self, interaction: discord.Interaction):
+        if not is_claim_ticket(interaction.channel):
+            await interaction.response.send_message(
+                "❌ This command can only be used inside a prize claim ticket.", ephemeral=True
+            )
+            return
+
+        existing = self.sponsors.get(interaction.channel.id)
+        if not existing:
+            await interaction.response.send_message(
+                "❌ There is no sponsor currently assigned to this claim.", ephemeral=True
+            )
+            return
+
+        is_current_sponsor = interaction.user.id == existing["sponsor_id"]
+        if not (is_current_sponsor or is_admin_user(interaction)):
+            await interaction.response.send_message(
+                f"❌ Only the assigned sponsor (<@{existing['sponsor_id']}>) or an admin can remove this sponsor.",
+                ephemeral=True,
+            )
+            return
+
+        self.sponsors.remove(interaction.channel.id)
+
+        embed = discord.Embed(
+            title="🚫 Sponsor Removed",
+            description=(
+                f"<@{existing['sponsor_id']}> is no longer the sponsor of this claim.\n"
+                f"Another staff member can now use `/giveaway sponsor`."
+            ),
+            color=discord.Color.red(),
+            timestamp=datetime.now(timezone.utc),
+        )
+        await interaction.response.send_message(embed=embed)
+
+    @giveaway_group.command(name="paid", description="Mark this prize claim as paid and notify the winner")
+    async def giveaway_paid(self, interaction: discord.Interaction):
+        if not is_claim_ticket(interaction.channel):
+            await interaction.response.send_message(
+                "❌ This command can only be used inside a prize claim ticket.", ephemeral=True
+            )
+            return
+
+        sponsor = self.sponsors.get(interaction.channel.id)
+        is_sponsor = sponsor is not None and interaction.user.id == sponsor["sponsor_id"]
+        if not (is_sponsor or is_staff_user(interaction)):
+            await interaction.response.send_message(
+                "❌ Only the assigned sponsor or a user with the Staff role can mark this claim as paid.",
+                ephemeral=True,
+            )
+            return
+
+        winner = get_claim_winner(interaction.channel)
+        if winner is None:
+            await interaction.response.send_message(
+                "❌ Couldn't determine the winner of this claim ticket.", ephemeral=True
+            )
+            return
+
+        cfg = get_guild_config(interaction.client.db, interaction.guild.id)
+        vouch_channel_id = cfg.get("VOUCH_CHANNEL_ID")
+        vouch_channel = interaction.guild.get_channel(vouch_channel_id) if vouch_channel_id else None
+        vouch_text = vouch_channel.mention if vouch_channel else "our vouch channel"
+
+        message_text = (
+            f"🎉 Your giveaway prize has been paid out!\n\n"
+            f"If you have a moment, please leave a vouch in {vouch_text} — it really helps us out!"
+        )
+
+        await interaction.response.send_message(f"{winner.mention} {message_text}")
+
+        try:
+            dm_embed = discord.Embed(
+                title="✅ Prize Paid",
+                description=message_text,
+                color=discord.Color.green(),
+                timestamp=datetime.now(timezone.utc),
+            )
+            if interaction.guild.icon:
+                dm_embed.set_thumbnail(url=interaction.guild.icon.url)
+            await winner.send(embed=dm_embed)
+        except Exception as e:
+            print(f"Failed to DM winner about payment: {e}")
+
+    @giveaway_group.command(name="end", description="Force end a giveaway early")
     @app_commands.describe(message_id="The message ID of the original giveaway")
     @admin_only()
     async def end_giveaway_early(self, interaction: discord.Interaction, message_id: str):
@@ -581,7 +809,7 @@ class Giveaways(commands.Cog):
         await self.end_giveaway(msg_id, giveaway)
         await interaction.response.send_message("✅ Giveaway ended!", ephemeral=True)
 
-    @app_commands.command(name="reroll", description="Reroll a giveaway winner")
+    @giveaway_group.command(name="reroll", description="Reroll a giveaway winner")
     @app_commands.describe(message_id="The message ID of the ORIGINAL giveaway")
     @admin_only()
     async def reroll_giveaway(self, interaction: discord.Interaction, message_id: str):
@@ -599,7 +827,7 @@ class Giveaways(commands.Cog):
         giveaway = self.giveaway_data.active_giveaways[msg_id]
 
         if not giveaway.ended:
-            await interaction.followup.send("❌ This giveaway hasn't ended yet! Use `/endgiveaway` first.", ephemeral=True)
+            await interaction.followup.send("❌ This giveaway hasn't ended yet! Use `/giveaway end` first.", ephemeral=True)
             return
 
         if giveaway.claimed_users:

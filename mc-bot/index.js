@@ -88,10 +88,36 @@ async function clearProfiles() {
   }
 }
 
+// ── Facing direction (yaw/pitch) ───────────────────────────────────────────────
+// Minecraft is supposed to remember where you were last facing, but on a bot
+// rejoin that can get reset. We track it ourselves and force it back on spawn.
+async function saveLook(yaw, pitch) {
+  try {
+    await db.collection('mc_auth').updateOne(
+      { _id: 'mc_look' },
+      { $set: { yaw, pitch, updated_at: new Date() } },
+      { upsert: true }
+    )
+  } catch (e) {
+    console.error('[MC-BOT] Failed to save look:', e.message)
+  }
+}
+
+async function loadLook() {
+  try {
+    const doc = await db.collection('mc_auth').findOne({ _id: 'mc_look' })
+    return doc ? { yaw: doc.yaw, pitch: doc.pitch } : null
+  } catch (e) {
+    console.error('[MC-BOT] Failed to load look:', e.message)
+    return null
+  }
+}
+
 // ── State ─────────────────────────────────────────────────────────────────────
 let bot              = null
 let botReady         = false
 let manualDisconnect = false
+let lookSaveInterval = null    // periodically persists current yaw/pitch while connected
 
 // status: disconnected | awaiting_auth | awaiting_discord_auth | connecting | ready | error
 let state = { status: 'disconnected', code: null, url: null, error: null }
@@ -158,6 +184,25 @@ function startBot(hasProfiles = false) {
     setState({ status: 'ready', code: null, url: null, error: null })
     // Backup the profiles folder to MongoDB so they survive restarts
     await backupProfiles()
+
+    // Force-restore the facing direction from before we last disconnected —
+    // the server can reset rotation on rejoin otherwise.
+    try {
+      const saved = await loadLook()
+      if (saved && bot) {
+        bot.look(saved.yaw, saved.pitch, true)
+        console.log('[MC-BOT] 🧭 Restored facing direction')
+      }
+    } catch (e) {
+      console.error('[MC-BOT] Failed to restore look:', e.message)
+    }
+
+    // Keep persisting current facing direction while connected, so the next
+    // reconnect (restart, etc.) knows where to face.
+    if (lookSaveInterval) clearInterval(lookSaveInterval)
+    lookSaveInterval = setInterval(() => {
+      if (bot && bot.entity) saveLook(bot.entity.yaw, bot.entity.pitch)
+    }, 5000)
   })
 
   bot.on('kicked', (reason) => {
@@ -181,6 +226,7 @@ function startBot(hasProfiles = false) {
   bot.on('end', (reason) => {
     console.log(`[MC-BOT] Disconnected: ${reason}`)
     botReady = false
+    if (lookSaveInterval) { clearInterval(lookSaveInterval); lookSaveInterval = null }
     if (manualDisconnect) {
       // User explicitly left — stay disconnected, don't auto-reconnect
       setState({ status: 'disconnected', code: null, url: null, error: null })
@@ -200,7 +246,6 @@ function startBot(hasProfiles = false) {
 
 app.get('/status', (_req, res) => res.json(state))
 
-// Fresh login — clears everything and starts device-code flow
 // Connect — reuse saved profiles if available, only do fresh MS login if none exist
 app.post("/start-login", async (_req, res) => {
   if (botReady) return res.json({ ok: true, message: "Already connected" })
@@ -233,8 +278,9 @@ app.post('/reconnect', async (_req, res) => {
 app.post('/logout', async (_req, res) => {
   if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null }
   manualDisconnect = true
-  // Backup profiles to MongoDB before ending so they survive
+  // Backup profiles + current facing direction to MongoDB before ending so they survive
   await backupProfiles()
+  if (bot?.entity) await saveLook(bot.entity.yaw, bot.entity.pitch)
   try { bot?.end() } catch (_) {}
   bot      = null
   botReady = false
@@ -277,14 +323,17 @@ connectMongo().then(async () => {
   app.listen(PORT, '127.0.0.1', () =>
     console.log(`[MC-BOT] 🌐 Listening on 127.0.0.1:${PORT}`)
   )
+  // On boot, only restore the cached MS token from MongoDB to disk —
+  // do NOT auto-connect to the server. Joining is a manual action now
+  // (dashboard "Connect" button / /mc-start-login), so a process
+  // restart doesn't silently put the bot back on the server.
   const hasProfiles = await restoreProfiles()
   if (hasProfiles) {
-    console.log('[MC-BOT] 🔄 Restored session — connecting...')
-    startBot(true)
+    console.log('[MC-BOT] 🔄 Session restored — staying disconnected until manually connected.')
   } else {
     console.log('[MC-BOT] ℹ️  No saved session — use the dashboard to log in.')
-    setState({ status: 'disconnected', code: null, url: null, error: null })
   }
+  setState({ status: 'disconnected', code: null, url: null, error: null })
 }).catch(err => {
   console.error('[MC-BOT] ❌ MongoDB connection failed:', err)
   process.exit(1)

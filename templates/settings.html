@@ -213,6 +213,16 @@
                     </select>
                     <span class="helper-text">Where new building tickets are posted for builders to claim.</span>
                 </div>
+                <div class="form-group">
+                    <label>Vouch Channel</label>
+                    <select name="VOUCH_CHANNEL_ID">
+                        <option value="none" {% if not settings.config or not settings.config.VOUCH_CHANNEL_ID %}selected{% endif %}>Disabled</option>
+                        {% for channel in channels|sort(attribute='position') %}
+                        <option value="{{ channel.id }}" {% if settings.config and settings.config.VOUCH_CHANNEL_ID and settings.config.VOUCH_CHANNEL_ID|int == channel.id|int %}selected{% endif %}># {{ channel.name }}</option>
+                        {% endfor %}
+                    </select>
+                    <span class="helper-text">Where winners are asked to leave a vouch after their giveaway prize is paid out.</span>
+                </div>
                 <button type="submit">Save Config</button>
             </form>
         </div>

@@ -288,6 +288,7 @@ def guild_dashboard(guild_id):
             log_channel_id = request.form.get("LOG_CHANNEL_ID")
             transcript_channel_id = request.form.get("TRANSCRIPT_CHANNEL_ID")
             builder_orders_channel_id = request.form.get("BUILDER_ORDERS_CHANNEL_ID")
+            vouch_channel_id = request.form.get("VOUCH_CHANNEL_ID")
 
             db["bot_config"].update_one(
                 {"guild_id": guild_id},
@@ -303,6 +304,9 @@ def guild_dashboard(guild_id):
                         else None,
                         "BUILDER_ORDERS_CHANNEL_ID": int(builder_orders_channel_id)
                         if builder_orders_channel_id and builder_orders_channel_id != "none"
+                        else None,
+                        "VOUCH_CHANNEL_ID": int(vouch_channel_id)
+                        if vouch_channel_id and vouch_channel_id != "none"
                         else None,
                     }
                 },
@@ -483,6 +487,7 @@ def guild_dashboard(guild_id):
                 "LOG_CHANNEL_ID": cfg.get("LOG_CHANNEL_ID"),
                 "TRANSCRIPT_CHANNEL_ID": cfg.get("TRANSCRIPT_CHANNEL_ID"),
                 "BUILDER_ORDERS_CHANNEL_ID": cfg.get("BUILDER_ORDERS_CHANNEL_ID"),
+                "VOUCH_CHANNEL_ID": cfg.get("VOUCH_CHANNEL_ID"),
             }
         )(db["bot_config"].find_one({"guild_id": guild_id}) or {}),
         "applications": list(db["applications_config"].find({"guild_id": guild_id})),
@@ -939,6 +944,7 @@ def mc_full_logout():
         return jsonify(r.json())
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 503
+
 
 # ── ADD THESE ROUTES TO app.py ────────────────────────────────────────────────
 # Paste before the `if __name__ == "__main__":` line

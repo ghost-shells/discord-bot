@@ -96,6 +96,10 @@ def get_guild_config(db, guild_id: int) -> dict:
     if transcript_id is None:
         transcript_id = _parse_channel_id(os.getenv("DEFAULT_TRANSCRIPT_CHANNEL_ID"))
 
+    vouch_channel_id = _parse_channel_id(config.get("VOUCH_CHANNEL_ID"))
+    if vouch_channel_id is None:
+        vouch_channel_id = _parse_channel_id(os.getenv("DEFAULT_VOUCH_CHANNEL_ID"))
+
     return {
         "STAFF_ROLE": config.get("STAFF_ROLE", DEFAULT_STAFF_ROLE),
         "MOD_ROLE": config.get("MOD_ROLE", DEFAULT_MOD_ROLE),
@@ -104,6 +108,7 @@ def get_guild_config(db, guild_id: int) -> dict:
         "LOG_CHANNEL_ID": _parse_channel_id(config.get("LOG_CHANNEL_ID")),
         "TRANSCRIPT_CHANNEL_ID": transcript_id,
         "BUILDER_ORDERS_CHANNEL_ID": builder_orders_id,
+        "VOUCH_CHANNEL_ID": vouch_channel_id,
     }
 
 
