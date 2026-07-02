@@ -2,6 +2,7 @@
 # /linkmc  — link your MC IGN to your Discord (verifies it exists on DonutSMP)
 # /unlinkmc — remove the link
 # /pay     — Trusted Staff only; verifies linked account + target IGN, then runs /pay in-game
+# /run     — Trusted Staff only; runs any raw command in-game and shows the captured output
 
 import discord
 from discord.ext import commands
@@ -40,19 +41,35 @@ async def verify_ign_exists(ign: str) -> bool:
     return await get_player_balance(ign) is not None
 
 
-async def send_mc_command(command: str) -> tuple[bool, str]:
+async def send_mc_command(command: str, capture_ms: int = 2000) -> tuple[bool, str, list[str]]:
+    """Runs a command in-game and returns (success, error, output_lines).
+
+    output_lines is whatever chat/system messages the bot saw in-game during
+    the capture window — this can include other players talking, not just
+    the server's response to this specific command.
+    """
     try:
         async with aiohttp.ClientSession() as session:
             async with session.post(
                 f"{MC_BOT_URL}/run-command",
-                json={"command": command},
-                timeout=aiohttp.ClientTimeout(total=10),
+                json={"command": command, "captureMs": capture_ms},
+                timeout=aiohttp.ClientTimeout(total=(capture_ms / 1000) + 10),
             ) as resp:
                 data = await resp.json()
-                return resp.status == 200, data.get("error", "")
+                return resp.status == 200, data.get("error", ""), data.get("output", [])
     except Exception as e:
         logger.error(f"MC command failed '{command}': {e}")
-        return False, str(e)
+        return False, str(e), []
+
+
+def format_output(lines: list[str], limit: int = 1000) -> str:
+    """Joins captured output lines into a Discord-safe code block."""
+    if not lines:
+        return "*(no output captured)*"
+    text = "\n".join(lines)
+    if len(text) > limit:
+        text = text[: limit - 1] + "…"
+    return f"```{text}```"
 
 
 # ── Cog ───────────────────────────────────────────────────────────────────────
@@ -90,6 +107,52 @@ class McPay(commands.Cog):
             await interaction.response.send_message("✅ Your Minecraft account has been unlinked.", ephemeral=True)
         else:
             await interaction.response.send_message("❌ You don't have a linked Minecraft account.", ephemeral=True)
+
+    # /run
+    @app_commands.command(name="run", description="Run a raw command in-game and see the output (Trusted Staff only)")
+    @app_commands.describe(command="The exact command to run, e.g. /pay Notch 1000 or /kit starter")
+    async def run(self, interaction: discord.Interaction, command: str):
+
+        # 1. Permission check
+        if not is_trusted_staff(interaction):
+            return await interaction.response.send_message(
+                "❌ You need the Trusted Staff role to use this command.", ephemeral=True
+            )
+
+        await interaction.response.defer(ephemeral=True)
+
+        # 2. Fire the raw command and capture what the server prints back
+        success, err, output = await send_mc_command(command)
+        if not success:
+            hint = "\n\n💡 Go to the dashboard `/mc-login` page to connect the MC bot first." \
+                   if "not ready" in err.lower() else ""
+            return await interaction.followup.send(
+                f"❌ Failed to run command: `{err}`{hint}", ephemeral=True
+            )
+
+        # 3. Show what happened in-game
+        embed = discord.Embed(title="🖥️ Command Run", color=0xE67E22)
+        embed.add_field(name="Command", value=f"`{command}`", inline=False)
+        embed.add_field(name="In-game output", value=format_output(output), inline=False)
+        embed.set_footer(text=f"Run by {interaction.user}")
+        await interaction.followup.send(embed=embed, ephemeral=True)
+
+        # 4. Log channel
+        cfg = get_guild_config(interaction.client.db, interaction.guild.id)
+        log_channel_id = cfg.get("LOG_CHANNEL_ID")
+        if log_channel_id:
+            ch = interaction.guild.get_channel(int(log_channel_id))
+            if ch:
+                log = discord.Embed(
+                    title="🖥️ Raw Command Run",
+                    description=f"{interaction.user.mention} ran: `{command}`",
+                    color=0xE67E22,
+                )
+                log.add_field(name="Output", value=format_output(output), inline=False)
+                try:
+                    await ch.send(embed=log)
+                except Exception:
+                    pass
 
     # /pay
     @app_commands.command(name="pay", description="Send in-game money to a DonutSMP player via the bot account")
@@ -130,7 +193,7 @@ class McPay(commands.Cog):
         amount_int = int(parsed)
 
         # 5. Fire the in-game command
-        success, err = await send_mc_command(f"/pay {ign} {amount_int}")
+        success, err, output = await send_mc_command(f"/pay {ign} {amount_int}")
         if not success:
             hint = "\n\n💡 Go to the dashboard `/mc-login` page to connect the MC bot first." \
                    if "not ready" in err.lower() else ""
@@ -143,6 +206,7 @@ class McPay(commands.Cog):
         embed.add_field(name="To",     value=f"`{ign}`",           inline=True)
         embed.add_field(name="Amount", value=f"`${amount_int:,}`", inline=True)
         embed.add_field(name="By",     value=interaction.user.mention, inline=True)
+        embed.add_field(name="In-game output", value=format_output(output), inline=False)
         embed.set_footer(text=f"Sent from linked account: {linked_ign}")
         await interaction.followup.send(embed=embed, ephemeral=True)
 

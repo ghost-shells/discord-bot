@@ -300,19 +300,36 @@ app.post('/full-logout', async (_req, res) => {
   res.json({ ok: true })
 })
 
-// Run in-game command
-app.post('/run-command', (req, res) => {
-  const { command } = req.body
+// Run in-game command, capturing whatever the server prints back
+app.post('/run-command', async (req, res) => {
+  const { command, captureMs } = req.body
   if (!command || typeof command !== 'string')
     return res.status(400).json({ ok: false, error: 'Missing command' })
   if (!botReady || !bot)
     return res.status(503).json({ ok: false, error: 'MC bot not ready' })
+
+  // How long to listen for a response after sending the command.
+  // Clamped so a bad value from the caller can't hang the request forever.
+  const waitMs = Math.min(Math.max(parseInt(captureMs, 10) || 2000, 500), 8000)
+
+  const output = []
+  const onMessage = (jsonMsg) => {
+    try {
+      const text = jsonMsg.toString().trim()
+      if (text) output.push(text)
+    } catch (_) {}
+  }
+
   try {
+    bot.on('message', onMessage)
     bot.chat(command)
     console.log(`[MC-BOT] ▶ ${command}`)
-    res.json({ ok: true })
+    await new Promise((resolve) => setTimeout(resolve, waitMs))
+    res.json({ ok: true, output })
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message })
+  } finally {
+    bot.removeListener('message', onMessage)
   }
 })
 
