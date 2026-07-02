@@ -17,7 +17,9 @@ app.use(express.json())
 // ── MongoDB ───────────────────────────────────────────────────────────────────
 const mongoClient = new MongoClient(process.env.MONGO_URI)
 let db = null
-const LINKS_COLLECTION = 'mc_links' // one document per discordId
+const LINKS_COLLECTION = 'mc_ms_sessions' // one document per discordId — Microsoft/mineflayer session data.
+                                           // NOTE: deliberately NOT named "mc_links" — that collection is
+                                           // already used by cogs/mcpay.py for unrelated IGN bookkeeping.
 
 async function connectMongo() {
   await mongoClient.connect()
