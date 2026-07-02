@@ -77,13 +77,15 @@
 <body>
 <div class="card">
   <div class="icon">🎮</div>
-  <h1>Minecraft Bot</h1>
-  <p class="sub">Connect the bot account to DonutSMP. No passwords stored — only a secure session token.</p>
+  <h1>Link Your Minecraft Account</h1>
+  <p class="sub">Link your own Microsoft account to DonutSMP. This is tied to your Discord account only — nobody else can see or control it. No passwords stored, only a secure session token.</p>
 
   <div id="badge" class="badge disconnected">
     <span class="dot"></span>
     <span id="badge-text">Checking…</span>
   </div>
+
+  <div id="mc-username" style="display:none; color:#8b95a1; font-size:13px; margin-bottom:20px;"></div>
 
   <div id="code-box" class="code-box" style="display:none">
     <p>Go to the link below and enter this code to sign in with Microsoft:</p>
@@ -101,14 +103,15 @@
     <button class="btn btn-authorized" onclick="iAuthorized()">✅ I Authorized</button>
   </div>
 
-  <button id="btn-login"   class="btn btn-login"   onclick="startLogin()">🔗 Connect</button>
+  <button id="btn-login"   class="btn btn-login"   onclick="startLogin()">🔗 Link My Account</button>
   <button id="btn-leave"   class="btn btn-leave"   onclick="leaveServer()" style="display:none">Leave Server</button>
-  <button id="btn-signout" class="btn btn-signout" onclick="fullLogout()"  style="display:none">Sign Out (clear token)</button>
+  <button id="btn-signout" class="btn btn-signout" onclick="fullLogout()"  style="display:none">Unlink (clear token)</button>
 
   <p class="hint">
-    <strong>Connect</strong> — logs on and just stays connected. Nothing else.<br>
-    <strong>Leave Server</strong> — disconnects but keeps your session saved, reconnects automatically.<br>
-    <strong>Sign Out</strong> — fully clears the token and requires a new Microsoft login next time.
+    <strong>Link My Account</strong> — signs in with your own Microsoft account and keeps you connected.<br>
+    <strong>Leave Server</strong> — disconnects but keeps your link saved, reconnects automatically.<br>
+    <strong>Unlink</strong> — fully clears your token and requires a new Microsoft login next time.<br><br>
+    You can also do all of this from Discord with <code>/link</code>, <code>/mcstatus</code>, and <code>/unlink</code>.
   </p>
 </div>
 
@@ -131,6 +134,7 @@
     const btnLogin   = document.getElementById('btn-login')
     const btnLeave   = document.getElementById('btn-leave')
     const btnSignout = document.getElementById('btn-signout')
+    const mcUsername = document.getElementById('mc-username')
 
     // Reset everything
     badge.className        = 'badge'
@@ -141,6 +145,7 @@
     btnLogin.disabled        = false
     btnLeave.style.display   = 'none'
     btnSignout.style.display = 'none'
+    mcUsername.style.display = 'none'
 
     if (s.status === 'ready') {
       badge.classList.add('ready')
@@ -148,6 +153,10 @@
       btnLogin.style.display   = 'none'
       btnLeave.style.display   = 'block'
       btnSignout.style.display = 'block'
+      if (s.mcUsername) {
+        mcUsername.textContent   = `Playing as ${s.mcUsername}`
+        mcUsername.style.display = 'block'
+      }
 
     } else if (s.status === 'awaiting_auth') {
       badge.classList.add('awaiting_auth')
@@ -200,7 +209,7 @@
   }
 
   async function fullLogout() {
-    if (!confirm('This clears your saved session and requires a full Microsoft login next time. Continue?')) return
+    if (!confirm('This unlinks your Minecraft account and requires a full Microsoft login next time. Continue?')) return
     await fetch('/mc-full-logout', { method: 'POST' })
     setTimeout(poll, 500)
   }

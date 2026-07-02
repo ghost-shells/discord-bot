@@ -86,6 +86,20 @@ def callback():
 
     session["access_token"] = tokens["access_token"]
 
+    # Store which Discord user this is, so per-user features (like the MC
+    # account link) know whose session to scope requests to.
+    me_response = requests.get(
+        "https://discord.com/api/users/@me",
+        headers={"Authorization": f"Bearer {session['access_token']}", "User-Agent": "DashboardBot/1.0"},
+    )
+    me = me_response.json()
+    if isinstance(me, dict) and "id" in me:
+        session["discord_user"] = {
+            "id": me["id"],
+            "username": me.get("username"),
+            "avatar": me.get("avatar"),
+        }
+
     guild_response = requests.get(
         "https://discord.com/api/users/@me/guilds",
         headers={"Authorization": f"Bearer {session['access_token']}", "User-Agent": "DashboardBot/1.0"},
@@ -882,19 +896,28 @@ def test_mongodb_route():
 MC_BOT_URL = os.getenv("MC_BOT_URL", "http://127.0.0.1:3001")
 
 
+def _current_discord_id():
+    """The Discord user ID of whoever is logged into the dashboard right now."""
+    return session.get("discord_user", {}).get("id")
+
+
 @app.route("/mc-login")
 def mc_login():
     if "access_token" not in session:
         return redirect("/")
+    if not _current_discord_id():
+        # Old session predating the discord_user field — force a fresh login
+        return redirect("/login")
     return render_template("mc_login.html")
 
 
 @app.route("/mc-status")
 def mc_status():
-    if "access_token" not in session:
+    discord_id = _current_discord_id()
+    if not discord_id:
         return jsonify({"error": "Unauthorized"}), 401
     try:
-        r = requests.get(f"{MC_BOT_URL}/status", timeout=5)
+        r = requests.get(f"{MC_BOT_URL}/status/{discord_id}", timeout=5)
         return jsonify(r.json())
     except Exception as e:
         return jsonify({"status": "error", "error": f"MC bot unreachable: {e}"}), 503
@@ -902,10 +925,11 @@ def mc_status():
 
 @app.route("/mc-start-login", methods=["POST"])
 def mc_start_login():
-    if "access_token" not in session:
+    discord_id = _current_discord_id()
+    if not discord_id:
         return jsonify({"error": "Unauthorized"}), 401
     try:
-        r = requests.post(f"{MC_BOT_URL}/start-login", timeout=10)
+        r = requests.post(f"{MC_BOT_URL}/start-login/{discord_id}", timeout=10)
         return jsonify(r.json())
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 503
@@ -913,10 +937,11 @@ def mc_start_login():
 
 @app.route("/mc-reconnect", methods=["POST"])
 def mc_reconnect():
-    if "access_token" not in session:
+    discord_id = _current_discord_id()
+    if not discord_id:
         return jsonify({"error": "Unauthorized"}), 401
     try:
-        r = requests.post(f"{MC_BOT_URL}/reconnect", timeout=10)
+        r = requests.post(f"{MC_BOT_URL}/reconnect/{discord_id}", timeout=10)
         return jsonify(r.json())
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 503
@@ -925,10 +950,11 @@ def mc_reconnect():
 @app.route("/mc-logout", methods=["POST"])
 def mc_logout():
     # Leave server but keep token — bot will reconnect next time
-    if "access_token" not in session:
+    discord_id = _current_discord_id()
+    if not discord_id:
         return jsonify({"error": "Unauthorized"}), 401
     try:
-        r = requests.post(f"{MC_BOT_URL}/logout", timeout=10)
+        r = requests.post(f"{MC_BOT_URL}/logout/{discord_id}", timeout=10)
         return jsonify(r.json())
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 503
@@ -937,10 +963,24 @@ def mc_logout():
 @app.route("/mc-full-logout", methods=["POST"])
 def mc_full_logout():
     # Disconnect AND wipe saved token (forces re-login next time)
-    if "access_token" not in session:
+    discord_id = _current_discord_id()
+    if not discord_id:
         return jsonify({"error": "Unauthorized"}), 401
     try:
-        r = requests.post(f"{MC_BOT_URL}/full-logout", timeout=10)
+        r = requests.post(f"{MC_BOT_URL}/full-logout/{discord_id}", timeout=10)
+        return jsonify(r.json())
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 503
+
+
+@app.route("/mc-run-command", methods=["POST"])
+def mc_run_command():
+    # Run an in-game command as the logged-in user's own linked account
+    discord_id = _current_discord_id()
+    if not discord_id:
+        return jsonify({"error": "Unauthorized"}), 401
+    try:
+        r = requests.post(f"{MC_BOT_URL}/run-command/{discord_id}", json=request.get_json(silent=True) or {}, timeout=12)
         return jsonify(r.json())
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 503
