@@ -1,21 +1,17 @@
 import discord
 from discord import app_commands
 from discord.ext import commands
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 import aiohttp
 import os
 import json
 import logging
-
-from db import get_db
 
 DONUTSMP_API_URL = os.getenv("DONUTSMP_API_URL", "https://api.donutsmp.net")
 DONUTSMP_API_KEY = os.getenv("DONUTSMP_API_KEY")
 
 logger = logging.getLogger(__name__)
 
-# Confirmed exact field names from the DonutSMP API's /v1/stats/{ign} response,
-# nested under "result". All values come back as strings.
 STAT_KEYS = {
     "balance":       "money",
     "shards":        "shards",
@@ -40,24 +36,41 @@ async def fetch_stats(ign: str):
         try:
             async with session.get(url, headers=headers, timeout=10) as resp:
                 raw = await resp.text()
-                if resp.status == 404:
-                    return None
                 if resp.status != 200:
-                    logger.error(f"DonutSMP stats API error for {ign}: {resp.status} - {raw}")
                     return None
-                try:
-                    data = json.loads(raw)
-                except json.JSONDecodeError:
-                    logger.error(f"DonutSMP stats API returned non-JSON for {ign}: {raw!r}")
-                    return None
+                data = json.loads(raw)
                 return data.get("result")
         except Exception as e:
             logger.error(f"DonutSMP stats API request failed for {ign}: {e}")
             return None
 
 
+async def fetch_location(ign: str) -> str | None:
+    """
+    Fetches /v1/lookup/{user}.
+    Returns the location string (e.g. 'Overworld', 'Nether', 'End')
+    or None if the player is offline / not found.
+    """
+    url = f"{DONUTSMP_API_URL}/v1/lookup/{ign}"
+    headers = {}
+    if DONUTSMP_API_KEY:
+        headers["Authorization"] = f"Bearer {DONUTSMP_API_KEY}"
+
+    async with aiohttp.ClientSession() as session:
+        try:
+            async with session.get(url, headers=headers, timeout=10) as resp:
+                raw = await resp.text()
+                if resp.status != 200:
+                    return None
+                data = json.loads(raw)
+                result = data.get("result", {})
+                return result.get("location")  # e.g. "Overworld", "Nether", "End", or None
+        except Exception as e:
+            logger.error(f"DonutSMP lookup API request failed for {ign}: {e}")
+            return None
+
+
 def parsed_stats(result: dict) -> dict:
-    """Turn the API's 'result' dict into our stat names, casting string numbers to floats."""
     out = {}
     for stat, key in STAT_KEYS.items():
         raw_val = result.get(key) if result else None
@@ -98,12 +111,50 @@ def fmt_playtime(milliseconds):
     return " ".join(parts)
 
 
-def fmt_delta(current, previous):
-    if previous is None or current is None:
-        return "(0 / 24h)"
-    delta = current - previous
-    sign = "+" if delta >= 0 else "-"
-    return f"({sign}{fmt_num(abs(delta))} / 24h)"
+WORLD_EMOJI = {
+    "overworld": "🌍",
+    "nether":    "🔥",
+    "end":       "🌌",
+}
+
+
+def _build_embed(ign: str, stats: dict, location: str | None) -> discord.Embed:
+    if location:
+        # Player is online
+        world_key = location.lower()
+        emoji = WORLD_EMOJI.get(world_key, "🌐")
+        status_text = f"🟢 Online • {emoji} {location}"
+        color = discord.Color.green()
+    else:
+        status_text = "🔴 Offline"
+        color = discord.Color.dark_purple()
+
+    embed = discord.Embed(
+        title=f"📊 {ign}'s Statistics",
+        color=color,
+        timestamp=datetime.now(timezone.utc),
+    )
+    embed.set_thumbnail(url=f"https://mc-heads.net/avatar/{ign}/128")
+
+    embed.add_field(
+        name="\u200b",
+        value=(
+            f"💰 **Balance:** `{fmt_num(stats['balance'])}`\n"
+            f"💎 **Shards:** `{fmt_num(stats['shards'])}`\n"
+            f"⚔️ **Kills:** `{fmt_num(stats['kills'])}`\n"
+            f"💀 **Deaths:** `{fmt_num(stats['deaths'])}`\n"
+            f"⏱️ **Playtime:** `{fmt_playtime(stats['playtime'])}`\n"
+            f"🧱 **Blocks Placed:** `{fmt_num(stats['blocks_placed'])}`\n"
+            f"⛏️ **Blocks Broken:** `{fmt_num(stats['blocks_broken'])}`\n"
+            f"🐷 **Mobs Killed:** `{fmt_num(stats['mobs_killed'])}`\n"
+            f"🛒 **Money Spent (Shop):** `{fmt_num(stats['shop_spent'])}`\n"
+            f"💵 **Money Made (Sell):** `{fmt_num(stats['shop_earned'])}`"
+        ),
+        inline=False,
+    )
+
+    embed.set_footer(text=status_text)
+    return embed
 
 
 class Stats(commands.Cog):
@@ -111,73 +162,20 @@ class Stats(commands.Cog):
 
     def __init__(self, bot: commands.Bot):
         self.bot = bot
-        self.db = get_db()
-
-    def _get_previous_snapshot(self, ign: str):
-        if self.db is None:
-            return None
-        cutoff_low = datetime.now(timezone.utc) - timedelta(hours=27)
-        cutoff_high = datetime.now(timezone.utc) - timedelta(hours=21)
-        doc = self.db["stat_snapshots"].find_one(
-            {
-                "ign_lower": ign.lower(),
-                "timestamp": {"$gte": cutoff_low, "$lte": cutoff_high},
-            },
-            sort=[("timestamp", 1)],
-        )
-        return doc.get("stats") if doc else None
-
-    def _save_snapshot(self, ign: str, stats: dict):
-        if self.db is None:
-            return
-        self.db["stat_snapshots"].insert_one(
-            {
-                "ign": ign,
-                "ign_lower": ign.lower(),
-                "timestamp": datetime.now(timezone.utc),
-                "stats": stats,
-            }
-        )
-
-    def _build_embed(self, ign: str, stats: dict, previous):
-        embed = discord.Embed(
-            title=f"📊 {ign}'s Statistics",
-            color=discord.Color.dark_purple(),
-            timestamp=datetime.now(timezone.utc),
-        )
-        embed.set_thumbnail(url=f"https://mc-heads.net/avatar/{ign}/128")
-
-        prev = previous or {}
-        embed.add_field(
-            name="\u200b",
-            value=(
-                f"💰 **Balance:** `{fmt_num(stats['balance'])}` {fmt_delta(stats['balance'], prev.get('balance'))}\n"
-                f"💎 **Shards:** `{fmt_num(stats['shards'])}` {fmt_delta(stats['shards'], prev.get('shards'))}\n"
-                f"⚔️ **Kills:** `{fmt_num(stats['kills'])}` {fmt_delta(stats['kills'], prev.get('kills'))}\n"
-                f"💀 **Deaths:** `{fmt_num(stats['deaths'])}` {fmt_delta(stats['deaths'], prev.get('deaths'))}\n"
-                f"⏱️ **Playtime:** `{fmt_playtime(stats['playtime'])}`\n"
-                f"🧱 **Blocks Placed:** `{fmt_num(stats['blocks_placed'])}` {fmt_delta(stats['blocks_placed'], prev.get('blocks_placed'))}\n"
-                f"⛏️ **Blocks Broken:** `{fmt_num(stats['blocks_broken'])}` {fmt_delta(stats['blocks_broken'], prev.get('blocks_broken'))}\n"
-                f"🐷 **Mobs Killed:** `{fmt_num(stats['mobs_killed'])}` {fmt_delta(stats['mobs_killed'], prev.get('mobs_killed'))}\n"
-                f"🛒 **Money Spent (Shop):** `{fmt_num(stats['shop_spent'])}` {fmt_delta(stats['shop_spent'], prev.get('shop_spent'))}\n"
-                f"💵 **Money Made (Sell):** `{fmt_num(stats['shop_earned'])}` {fmt_delta(stats['shop_earned'], prev.get('shop_earned'))}"
-            ),
-            inline=False,
-        )
-        embed.set_footer(text=f"Stats for {ign}")
-        return embed
 
     async def _send_stats(self, send_func, ign: str):
+        # Fetch stats first — if this fails the IGN is wrong
         result = await fetch_stats(ign)
         if result is None:
             await send_func(f"❌ Couldn't find stats for `{ign}`. Check the spelling or try again later.")
             return
 
         stats = parsed_stats(result)
-        previous = self._get_previous_snapshot(ign)
-        self._save_snapshot(ign, stats)
 
-        embed = self._build_embed(ign, stats, previous)
+        # Now fetch location to determine online/offline status
+        location = await fetch_location(ign)
+
+        embed = _build_embed(ign, stats, location)
         await send_func(embed=embed)
 
     @app_commands.command(name="stats", description="View a player's DonutSMP stats.")
