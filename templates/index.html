@@ -1,11 +1,324 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Bot Dashboard</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <style>
+        body {
+            display: block;
+            height: auto;
+            min-height: 100vh;
+            overflow: auto;
+        }
+
+        /* ═══════════════ NAVBAR ═══════════════ */
+        .navbar {
+            position: relative;
+            z-index: 2;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            max-width: 1120px;
+            margin: 0 auto;
+            padding: 22px 24px 0;
+        }
+        .brand { display: flex; align-items: center; gap: 10px; font-weight: 800; color: var(--text-bright); letter-spacing: -0.02em; font-size: 15px; }
+        .brand .brand-dot { width: 9px; height: 9px; border-radius: 3px; background: var(--accent); box-shadow: 0 0 0 4px var(--accent-tint); }
+        .nav-links { display: flex; align-items: center; gap: 28px; }
+        .nav-links a { color: var(--text-muted); text-decoration: none; font-size: 13.5px; font-weight: 600; transition: color var(--transition); }
+        .nav-links a:hover { color: var(--text-main); }
+        .nav-login {
+            background: var(--bg-surface); border: 1px solid var(--border); color: var(--text-bright) !important;
+            padding: 9px 18px; border-radius: var(--r-sm);
+        }
+        .nav-login:hover { border-color: rgba(88,101,242,0.4); color: var(--text-bright) !important; }
+
+        /* ═══════════════ HERO ═══════════════ */
+        .hero {
+            max-width: 780px;
+            margin: 0 auto;
+            padding: 76px 24px 40px;
+            text-align: center;
+            position: relative;
+            z-index: 1;
+        }
+        .hero-badge {
+            display: inline-flex; align-items: center; gap: 8px;
+            background: var(--accent-tint); border: 1px solid rgba(88,101,242,0.25);
+            color: var(--accent-light); padding: 6px 16px; border-radius: 999px;
+            font-size: 12px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
+            margin-bottom: 26px;
+            animation: fadeInUp 0.5s var(--transition-slow) both;
+        }
+        .hero-badge .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--success); animation: dotPulse 1.6s ease-in-out infinite; }
+        .hero h1 {
+            font-size: 50px; font-weight: 800; letter-spacing: -0.03em; line-height: 1.08;
+            margin-bottom: 20px; color: var(--text-bright);
+            animation: fadeInUp 0.5s 0.05s var(--transition-slow) both;
+        }
+        .hero h1 span {
+            background: linear-gradient(135deg, var(--accent-light) 20%, var(--accent) 100%);
+            -webkit-background-clip: text; background-clip: text; color: transparent;
+        }
+        .hero p.sub {
+            color: var(--text-muted); font-size: 16.5px; line-height: 1.65;
+            max-width: 560px; margin: 0 auto 36px;
+            animation: fadeInUp 0.5s 0.1s var(--transition-slow) both;
+        }
+        .hero-actions {
+            display: flex; gap: 14px; justify-content: center; flex-wrap: wrap;
+            animation: fadeInUp 0.5s 0.15s var(--transition-slow) both;
+        }
+        .btn-primary, .btn-secondary {
+            display: inline-flex; align-items: center; gap: 10px;
+            padding: 15px 28px; border-radius: var(--r-md);
+            text-decoration: none; font-size: 15px; font-weight: 700; font-family: inherit;
+            transition: transform var(--transition), box-shadow var(--transition), background var(--transition), border-color var(--transition);
+            position: relative; overflow: hidden;
+        }
+        .btn-primary { background: var(--accent); color: #fff; }
+        .btn-primary:hover { background: var(--accent-mid); transform: translateY(-2px); box-shadow: 0 10px 30px var(--accent-glow); }
+        .btn-primary::after {
+            content: ''; position: absolute; inset: 0;
+            background: linear-gradient(115deg, transparent 20%, rgba(255,255,255,0.25) 40%, transparent 60%);
+            transform: translateX(-120%); transition: transform 0.55s ease;
+        }
+        .btn-primary:hover::after { transform: translateX(120%); }
+        .btn-secondary { background: var(--bg-surface); color: var(--text-bright); border: 1px solid var(--border); }
+        .btn-secondary:hover { border-color: rgba(88,101,242,0.4); transform: translateY(-2px); }
+
+        .hero-note { margin-top: 16px; font-size: 12px; color: var(--text-faint); animation: fadeInUp 0.5s 0.2s var(--transition-slow) both; }
+
+        /* ═══════════════ SECTIONS ═══════════════ */
+        section { position: relative; z-index: 1; max-width: 1120px; margin: 0 auto; padding: 64px 24px; }
+        .section-eyebrow {
+            display: inline-block; color: var(--accent-light); font-size: 12px; font-weight: 700;
+            text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 12px;
+        }
+        .section-title { font-size: 30px; font-weight: 800; letter-spacing: -0.02em; color: var(--text-bright); margin-bottom: 12px; }
+        .section-sub { color: var(--text-muted); font-size: 15px; max-width: 540px; line-height: 1.65; margin-bottom: 44px; }
+        .section-head.center { text-align: center; }
+        .section-head.center .section-sub { margin-left: auto; margin-right: auto; }
+
+        /* ═══════════════ FEATURE GRID ═══════════════ */
+        .feature-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 16px;
+        }
+        .feature-card {
+            background: var(--bg-surface); border: 1px solid var(--border); border-radius: var(--r-lg);
+            padding: 24px; text-align: left; position: relative; overflow: hidden;
+            transition: transform var(--transition-slow), border-color var(--transition), box-shadow var(--transition-slow);
+        }
+        .feature-card::before {
+            content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px;
+            background: linear-gradient(90deg, var(--accent) 0%, transparent 100%);
+            opacity: 0; transition: opacity 0.2s;
+        }
+        .feature-card:hover { transform: translateY(-4px); border-color: rgba(88,101,242,0.35); box-shadow: var(--shadow-soft); }
+        .feature-card:hover::before { opacity: 1; }
+        .feature-icon {
+            width: 42px; height: 42px; border-radius: var(--r-sm); background: var(--accent-tint);
+            border: 1px solid rgba(88,101,242,0.2); display: flex; align-items: center; justify-content: center;
+            font-size: 19px; margin-bottom: 16px;
+        }
+        .feature-card h4 { font-size: 15.5px; font-weight: 700; color: var(--text-bright); margin-bottom: 7px; letter-spacing: -0.01em; }
+        .feature-card p { font-size: 13.5px; color: var(--text-muted); line-height: 1.6; }
+
+        /* ═══════════════ STEPS ═══════════════ */
+        .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; counter-reset: step; }
+        .step { position: relative; padding-left: 4px; }
+        .step-num {
+            display: flex; align-items: center; justify-content: center;
+            width: 38px; height: 38px; border-radius: 50%;
+            background: var(--accent-tint); border: 1px solid rgba(88,101,242,0.3); color: var(--accent-light);
+            font-weight: 800; font-size: 15px; margin-bottom: 18px;
+        }
+        .step h4 { font-size: 16px; font-weight: 700; color: var(--text-bright); margin-bottom: 8px; }
+        .step p { font-size: 13.5px; color: var(--text-muted); line-height: 1.65; }
+        .step-connector {
+            display: none;
+        }
+        @media (min-width: 861px) {
+            .steps { position: relative; }
+            .steps::before {
+                content: '';
+                position: absolute; top: 19px; left: calc(100%/6); right: calc(100%/6);
+                height: 1px; background: repeating-linear-gradient(90deg, var(--border) 0 8px, transparent 8px 14px);
+                z-index: 0;
+            }
+            .step { z-index: 1; }
+        }
+
+        /* ═══════════════ CTA BAND ═══════════════ */
+        .cta-band {
+            background: var(--bg-surface); border: 1px solid var(--border); border-radius: var(--r-xl);
+            padding: 48px; text-align: center; position: relative; overflow: hidden;
+        }
+        .cta-band::before {
+            content: ''; position: absolute; inset: -40%; z-index: 0; pointer-events: none;
+            background: radial-gradient(420px circle at 50% 0%, var(--accent-tint), transparent 65%);
+        }
+        .cta-band > * { position: relative; z-index: 1; }
+        .cta-band h3 { font-size: 24px; font-weight: 800; color: var(--text-bright); margin-bottom: 10px; letter-spacing: -0.02em; }
+        .cta-band p { color: var(--text-muted); font-size: 14.5px; margin-bottom: 26px; }
+
+        footer {
+            border-top: 1px solid var(--border);
+            padding: 28px 24px;
+            text-align: center;
+            color: var(--text-faint);
+            font-size: 12.5px;
+            position: relative; z-index: 1;
+        }
+
+        @media (max-width: 860px) {
+            .hero h1 { font-size: 34px; }
+            .feature-grid { grid-template-columns: 1fr 1fr; }
+            .steps { grid-template-columns: 1fr; }
+            .nav-links a:not(.nav-login) { display: none; }
+        }
+        @media (max-width: 540px) {
+            .feature-grid { grid-template-columns: 1fr; }
+        }
+    </style>
 </head>
-<body style="background-color: #2b2d31; color: white; font-family: Arial; text-align: center; padding-top: 100px;">
-    <h1>Welcome to the Bot Dashboard</h1>
-    <p>Log in with Discord to manage your server settings.</p>
-    <a href="/login" style="background-color: #5865F2; color: white; padding: 15px 25px; text-decoration: none; border-radius: 5px; font-size: 18px;">Login with Discord</a>
+<body>
+
+    <nav class="navbar">
+        <div class="brand"><span class="brand-dot"></span>Bot Dashboard</div>
+        <div class="nav-links">
+            <a href="#features">Features</a>
+            <a href="#setup">Setup</a>
+            <a href="/login" class="nav-login">Log In</a>
+        </div>
+    </nav>
+
+    <div class="hero">
+        <div class="hero-badge"><span class="dot"></span> Online &amp; ready</div>
+        <h1>One bot for <span>tickets, moderation,<br>and your whole server</span></h1>
+        <p class="sub">Autorole, welcome messages, AutoMod, ticket management, applications, transcripts, and a built-in build &amp; payment tracker — all configured from one dashboard.</p>
+        <div class="hero-actions">
+            <a href="https://discord.com/oauth2/authorize?client_id=1519136526049480925&permissions=8&integration_type=0&scope=bot+applications.commands" class="btn-primary">
+                <svg width="20" height="20" viewBox="0 0 127.14 96.36" fill="currentColor"><path d="M107.7,8.07A105.15,105.15,0,0,0,81.47,0a72.06,72.06,0,0,0-3.36,6.83A97.68,97.68,0,0,0,49,6.83,72.37,72.37,0,0,0,45.64,0,105.89,105.89,0,0,0,19.39,8.09C2.79,32.65-1.71,56.6.54,80.21h0A105.73,105.73,0,0,0,32.71,96.36,77.7,77.7,0,0,0,39.6,85.25a68.42,68.42,0,0,1-10.85-5.18c.91-.66,1.8-1.34,2.66-2a75.57,75.57,0,0,0,64.32,0c.87.71,1.76,1.39,2.66,2a68.68,68.68,0,0,1-10.87,5.19,77,77,0,0,0,6.89,11.1A105.25,105.25,0,0,0,126.6,80.22h0C129.24,52.84,122.09,29.11,107.7,8.07ZM42.45,65.69C36.18,65.69,31,60,31,53s5-12.74,11.43-12.74S54,46,53.89,53,48.84,65.69,42.45,65.69Zm42.24,0C78.41,65.69,73.25,60,73.25,53s5-12.74,11.44-12.74S96.23,46,96.12,53,91.08,65.69,84.69,65.69Z"/></svg>
+                Add to Discord
+            </a>
+            <a href="/login" class="btn-secondary">Log In to Dashboard →</a>
+        </div>
+        <p class="hero-note">Requires the "Manage Server" permission on the server you're adding it to.</p>
+    </div>
+
+    <section id="features">
+        <div class="section-head center">
+            <span class="section-eyebrow">Features</span>
+            <h2 class="section-title">Everything your server needs</h2>
+            <p class="section-sub">Every feature below is toggled and configured from the dashboard — no commands to memorize.</p>
+        </div>
+        <div class="feature-grid">
+            <div class="feature-card">
+                <div class="feature-icon">🤖</div>
+                <h4>Autorole</h4>
+                <p>Automatically assign a role to every new member the moment they join.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">👋</div>
+                <h4>Welcome Messages</h4>
+                <p>Greet new members in any channel with a custom message and live variables.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">📜</div>
+                <h4>Event Logging</h4>
+                <p>Track deleted messages, edits, and member joins/leaves in a log channel.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">🛡️</div>
+                <h4>AutoMod</h4>
+                <p>Block links, invites, and banned words automatically across chosen channels.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">🔑</div>
+                <h4>Command Permissions</h4>
+                <p>Decide exactly which roles can use which commands, down to the command.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">🎫</div>
+                <h4>Ticket Manager</h4>
+                <p>Full support ticket system with categories, claiming, and auto-generated transcripts.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">📝</div>
+                <h4>Applications</h4>
+                <p>Build custom application forms for staff, builder, or whitelist applications.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">📑</div>
+                <h4>Transcripts</h4>
+                <p>Every closed ticket is saved and viewable online or downloadable by staff.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">🏗️</div>
+                <h4>Build &amp; Payment Tracker</h4>
+                <p>List builds for sale, take orders through tickets, and track payments automatically.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">📢</div>
+                <h4>Announcements</h4>
+                <p>Push formatted announcements to any channel straight from the dashboard.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">🎮</div>
+                <h4>Minecraft Account Linking</h4>
+                <p>Members securely link their Microsoft account for in-game verification.</p>
+            </div>
+        </div>
+    </section>
+
+    <section id="setup">
+        <div class="section-head center">
+            <span class="section-eyebrow">Setup</span>
+            <h2 class="section-title">Get set up in three steps</h2>
+            <p class="section-sub">No coding, no config files — everything happens in the browser.</p>
+        </div>
+        <div class="steps">
+            <div class="step">
+                <div class="step-num">1</div>
+                <h4>Add the bot</h4>
+                <p>Click "Add to Discord" above and choose the server you want to set it up in. You'll need the "Manage Server" permission.</p>
+            </div>
+            <div class="step">
+                <div class="step-num">2</div>
+                <h4>Log in with Discord</h4>
+                <p>Sign in to the dashboard with your Discord account to see every server you manage.</p>
+            </div>
+            <div class="step">
+                <div class="step-num">3</div>
+                <h4>Turn on what you need</h4>
+                <p>Pick a server, flip on the features you want — autorole, tickets, AutoMod, and more — and save.</p>
+            </div>
+        </div>
+    </section>
+
+    <section>
+        <div class="cta-band">
+            <h3>Ready to set up your server?</h3>
+            <p>It takes less than two minutes to get the bot in and your first feature configured.</p>
+            <div class="hero-actions">
+                <a href="https://discord.com/oauth2/authorize?client_id=1519136526049480925&permissions=8&integration_type=0&scope=bot+applications.commands" class="btn-primary">
+                    Add to Discord
+                </a>
+                <a href="/login" class="btn-secondary">Log In →</a>
+            </div>
+        </div>
+    </section>
+
+    <footer>
+        <a href="/login" style="color: var(--text-muted); text-decoration: none;">Dashboard</a>
+        &nbsp;·&nbsp;
+        <a href="/transcripts" style="color: var(--text-muted); text-decoration: none;">Transcripts</a>
+    </footer>
+
 </body>
 </html>

@@ -14,33 +14,20 @@ DONUTSMP_API_KEY = os.getenv("DONUTSMP_API_KEY")
 
 logger = logging.getLogger(__name__)
 
+# Confirmed exact field names from the DonutSMP API's /v1/stats/{ign} response,
+# nested under "result". All values come back as strings.
 STAT_KEYS = {
-    "balance":          ["money", "balance", "coins"],
-    "shards":           ["shards"],
-    "kills":            ["kills", "player_kills", "playerKills"],
-    "deaths":           ["deaths"],
-    "playtime":         ["playtime", "play_time", "playTime", "time_played"],
-    "blocks_placed":    ["blocks_placed", "placed_blocks", "blocksPlaced"],
-    "blocks_broken":    ["blocks_broken", "broken_blocks", "blocksBroken"],
-    "mobs_killed":      ["mobs_killed", "mob_kills", "mobsKilled", "mobkills"],
-    "shop_spent":       ["shop_spent", "money_spent", "moneySpent", "bought"],
-    "shop_earned":      ["sell", "money_made", "moneyMade", "sold", "shop_earnings"],
-    "vouches":          ["vouches", "vouch_count"],
-    "world":            ["world", "current_world"],
+    "balance":       "money",
+    "shards":        "shards",
+    "kills":         "kills",
+    "deaths":        "deaths",
+    "playtime":      "playtime",
+    "blocks_placed": "placed_blocks",
+    "blocks_broken": "broken_blocks",
+    "mobs_killed":   "mobs_killed",
+    "shop_spent":    "money_spent_on_shop",
+    "shop_earned":   "money_made_from_sell",
 }
-
-
-def _extract(data: dict, keys: list):
-    if not isinstance(data, dict):
-        return None
-    for k in keys:
-        if k in data and data[k] is not None:
-            return data[k]
-    if "result" in data and isinstance(data["result"], dict):
-        for k in keys:
-            if k in data["result"] and data["result"][k] is not None:
-                return data["result"][k]
-    return None
 
 
 async def fetch_stats(ign: str):
@@ -63,25 +50,26 @@ async def fetch_stats(ign: str):
                 except json.JSONDecodeError:
                     logger.error(f"DonutSMP stats API returned non-JSON for {ign}: {raw!r}")
                     return None
-                return data
+                return data.get("result")
         except Exception as e:
             logger.error(f"DonutSMP stats API request failed for {ign}: {e}")
             return None
 
 
-def parsed_stats(raw: dict) -> dict:
+def parsed_stats(result: dict) -> dict:
+    """Turn the API's 'result' dict into our stat names, casting string numbers to floats."""
     out = {}
-    for stat, keys in STAT_KEYS.items():
-        out[stat] = _extract(raw, keys)
+    for stat, key in STAT_KEYS.items():
+        raw_val = result.get(key) if result else None
+        try:
+            out[stat] = float(raw_val)
+        except (TypeError, ValueError):
+            out[stat] = None
     return out
 
 
 def fmt_num(n):
     if n is None:
-        return "N/A"
-    try:
-        n = float(n)
-    except (TypeError, ValueError):
         return "N/A"
     sign = "-" if n < 0 else ""
     n = abs(n)
@@ -94,13 +82,10 @@ def fmt_num(n):
     return f"{sign}{n:.0f}" if n == int(n) else f"{sign}{n:.2f}"
 
 
-def fmt_playtime(seconds):
-    if seconds is None:
+def fmt_playtime(milliseconds):
+    if milliseconds is None:
         return "N/A"
-    try:
-        seconds = int(seconds)
-    except (TypeError, ValueError):
-        return "N/A"
+    seconds = int(milliseconds) // 1000
     days = seconds // 86400
     hours = (seconds % 86400) // 3600
     minutes = (seconds % 3600) // 60
@@ -116,10 +101,7 @@ def fmt_playtime(seconds):
 def fmt_delta(current, previous):
     if previous is None or current is None:
         return "(0 / 24h)"
-    try:
-        delta = float(current) - float(previous)
-    except (TypeError, ValueError):
-        return "(0 / 24h)"
+    delta = current - previous
     sign = "+" if delta >= 0 else "-"
     return f"({sign}{fmt_num(abs(delta))} / 24h)"
 
@@ -165,38 +147,33 @@ class Stats(commands.Cog):
         )
         embed.set_thumbnail(url=f"https://mc-heads.net/avatar/{ign}/128")
 
+        prev = previous or {}
         embed.add_field(
             name="\u200b",
             value=(
-                f"💰 **Balance:** `{fmt_num(stats['balance'])}` {fmt_delta(stats['balance'], previous.get('balance') if previous else None)}\n"
-                f"💎 **Shards:** `{fmt_num(stats['shards'])}` {fmt_delta(stats['shards'], previous.get('shards') if previous else None)}\n"
-                f"⚔️ **Kills:** `{fmt_num(stats['kills'])}` {fmt_delta(stats['kills'], previous.get('kills') if previous else None)}\n"
-                f"💀 **Deaths:** `{fmt_num(stats['deaths'])}` {fmt_delta(stats['deaths'], previous.get('deaths') if previous else None)}\n"
+                f"💰 **Balance:** `{fmt_num(stats['balance'])}` {fmt_delta(stats['balance'], prev.get('balance'))}\n"
+                f"💎 **Shards:** `{fmt_num(stats['shards'])}` {fmt_delta(stats['shards'], prev.get('shards'))}\n"
+                f"⚔️ **Kills:** `{fmt_num(stats['kills'])}` {fmt_delta(stats['kills'], prev.get('kills'))}\n"
+                f"💀 **Deaths:** `{fmt_num(stats['deaths'])}` {fmt_delta(stats['deaths'], prev.get('deaths'))}\n"
                 f"⏱️ **Playtime:** `{fmt_playtime(stats['playtime'])}`\n"
-                f"🧱 **Blocks Placed:** `{fmt_num(stats['blocks_placed'])}` {fmt_delta(stats['blocks_placed'], previous.get('blocks_placed') if previous else None)}\n"
-                f"⛏️ **Blocks Broken:** `{fmt_num(stats['blocks_broken'])}` {fmt_delta(stats['blocks_broken'], previous.get('blocks_broken') if previous else None)}\n"
-                f"🐷 **Mobs Killed:** `{fmt_num(stats['mobs_killed'])}` {fmt_delta(stats['mobs_killed'], previous.get('mobs_killed') if previous else None)}\n"
-                f"🛒 **Money Spent (Shop):** `{fmt_num(stats['shop_spent'])}` {fmt_delta(stats['shop_spent'], previous.get('shop_spent') if previous else None)}\n"
-                f"💵 **Money Made (Sell):** `{fmt_num(stats['shop_earned'])}` {fmt_delta(stats['shop_earned'], previous.get('shop_earned') if previous else None)}\n"
-                f"✅ **Vouches:** `{fmt_num(stats['vouches']) if stats['vouches'] is not None else 0}`"
+                f"🧱 **Blocks Placed:** `{fmt_num(stats['blocks_placed'])}` {fmt_delta(stats['blocks_placed'], prev.get('blocks_placed'))}\n"
+                f"⛏️ **Blocks Broken:** `{fmt_num(stats['blocks_broken'])}` {fmt_delta(stats['blocks_broken'], prev.get('blocks_broken'))}\n"
+                f"🐷 **Mobs Killed:** `{fmt_num(stats['mobs_killed'])}` {fmt_delta(stats['mobs_killed'], prev.get('mobs_killed'))}\n"
+                f"🛒 **Money Spent (Shop):** `{fmt_num(stats['shop_spent'])}` {fmt_delta(stats['shop_spent'], prev.get('shop_spent'))}\n"
+                f"💵 **Money Made (Sell):** `{fmt_num(stats['shop_earned'])}` {fmt_delta(stats['shop_earned'], prev.get('shop_earned'))}"
             ),
             inline=False,
         )
-
-        if stats.get("world"):
-            embed.set_footer(text=f"{ign} is currently in the {stats['world']}")
-        else:
-            embed.set_footer(text=f"Stats for {ign}")
-
+        embed.set_footer(text=f"Stats for {ign}")
         return embed
 
     async def _send_stats(self, send_func, ign: str):
-        raw = await fetch_stats(ign)
-        if raw is None:
+        result = await fetch_stats(ign)
+        if result is None:
             await send_func(f"❌ Couldn't find stats for `{ign}`. Check the spelling or try again later.")
             return
 
-        stats = parsed_stats(raw)
+        stats = parsed_stats(result)
         previous = self._get_previous_snapshot(ign)
         self._save_snapshot(ign, stats)
 
@@ -205,6 +182,8 @@ class Stats(commands.Cog):
 
     @app_commands.command(name="stats", description="View a player's DonutSMP stats.")
     @app_commands.describe(ign="Minecraft username to look up")
+    @app_commands.allowed_installs(guilds=True, users=True)
+    @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
     async def stats_slash(self, interaction: discord.Interaction, ign: str):
         await interaction.response.defer()
         await self._send_stats(interaction.followup.send, ign)

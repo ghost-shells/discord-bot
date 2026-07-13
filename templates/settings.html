@@ -6,42 +6,8 @@
     <title>{{ guild_name }} Dashboard</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
     <style>
-        :root {
-            --bg-main: #2b2d31; --bg-sidebar: #1e1f22; --bg-card: #313338;
-            --accent: #5865F2; --accent-hover: #4752c4; --text-main: #dbdee1;
-            --text-muted: #949ba4; --border: #3f4147; --input-bg: #383a40;
-        }
-        body { margin: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: var(--bg-main); color: var(--text-main); display: flex; height: 100vh; overflow: hidden; }
-        .sidebar { width: 240px; background-color: var(--bg-sidebar); padding: 20px 0; display: flex; flex-direction: column; border-right: 1px solid var(--border); overflow-y: auto; }
-        .sidebar h2 { padding: 0 20px 20px; margin: 0; border-bottom: 1px solid var(--border); color: var(--text-main); font-size: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .nav-category { padding: 10px 20px 5px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: var(--text-muted); letter-spacing: 0.5px; }
-        .nav-item { padding: 10px 20px; cursor: pointer; transition: 0.2s; color: var(--text-muted); font-weight: 500; font-size: 14px; border-left: 3px solid transparent; }
-        .nav-item:hover { background-color: var(--bg-main); color: var(--text-main); }
-        .nav-item.active { background-color: var(--bg-main); color: var(--accent); border-left-color: var(--accent); }
-        .content { flex: 1; padding: 40px; overflow-y: auto; display: flex; justify-content: center; }
-        .content-inner { width: 100%; max-width: 900px; }
-        .back-link { color: var(--text-muted); text-decoration: none; display: block; margin-bottom: 20px; font-size: 13px; font-weight: 600; }
-        .back-link:hover { color: var(--accent); }
-        .card { background-color: var(--bg-card); padding: 30px; border-radius: 8px; margin-bottom: 20px; border: 1px solid var(--border); display: none; }
-        .card.active { display: block; }
-        .card h3 { margin-top: 0; color: var(--text-main); font-size: 20px; border-bottom: 1px solid var(--border); padding-bottom: 15px; }
-        .card p { color:var(--text-muted); font-size: 14px; margin-top: -10px; margin-bottom: 25px; }
-        .form-group { margin-bottom: 25px; }
-        .form-group label { display: block; margin-bottom: 8px; font-weight: 600; color: var(--text-main); font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px; }
-        select, input[type="text"], textarea { width: 100%; padding: 12px; border-radius: 6px; border: 1px solid var(--border); background-color: var(--input-bg); color: var(--text-main); outline: none; font-size: 14px; box-sizing: border-box; transition: border-color 0.2s; }
-        select:focus, input[type="text"]:focus, textarea:focus { border-color: var(--accent); }
-        textarea { resize: vertical; min-height: 100px; }
-        .checkbox-group { display: flex; align-items: center; gap: 12px; margin-bottom: 15px; background-color: var(--input-bg); padding: 12px 16px; border-radius: 6px; border: 1px solid var(--border); }
-        .checkbox-group input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--accent); cursor: pointer; }
-        .checkbox-group label { text-transform: none; font-weight: normal; font-size: 14px; color: var(--text-main); cursor: pointer; flex: 1; }
-        button { background-color: var(--accent); color: white; border: none; padding: 12px 24px; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 15px; transition: 0.2s; margin-top: 10px; }
-        button:hover { background-color: var(--accent-hover); }
-        .cmd-row { display: flex; justify-content: space-between; align-items: center; background-color: var(--input-bg); padding: 15px; border-radius: 6px; margin-bottom: 10px; border: 1px solid var(--border); }
-        .cmd-row:hover { border-color: var(--accent); }
-        .cmd-name { font-family: monospace; font-size: 15px; color: var(--accent); }
-        .cmd-roles { flex: 1; margin-left: 20px; }
-        .helper-text { color: var(--text-muted); font-size: 12px; display: block; margin-top: 5px; }
-        hr { border: 0; border-top: 1px solid var(--border); margin: 30px 0; }
+        /* page-specific: centered content column on wide screens */
+        .content { display: flex; justify-content: center; }
     </style>
 </head>
 <body>
@@ -72,6 +38,8 @@
     <div class="nav-category">Utility</div>
     <div class="nav-item" onclick="switchTab('announcement', this)">📢 Announcement</div>
     <div class="nav-item" onclick="switchTab('building', this)">🏗️ Building</div>
+
+    <a class="nav-item logout" href="/logout">🚪 Log Out</a>
 </div>
 
 <div class="content">
@@ -259,7 +227,7 @@
                         <div><strong>{{ app.app_name }}</strong> <code style="color:var(--text-muted); background:var(--bg-main); padding:2px 5px; border-radius:3px;">{{ app.app_id }}</code><br><small style="color: var(--text-muted);">Status: {% if app.is_open %}🟢 Open{% else %}🔴 Closed{% endif %} | Questions: {{ app.questions|length }}</small></div>
                         <div style="display: flex; gap: 10px;">
                             <button type="button" class="edit-app-btn" data-app-id="{{ app.app_id }}" data-app-name="{{ app.app_name }}" data-questions="{{ '\n'.join(app.questions) | e }}" data-is-open="{{ 'true' if app.is_open else 'false' }}" data-sub-chan="{{ app.submitted_channel_id or 'none' }}" data-acc-chan="{{ app.accepted_channel_id or 'none' }}" data-den-chan="{{ app.denied_channel_id or 'none' }}" style="background-color: var(--accent); padding: 8px 15px; font-size: 13px; margin:0;">Edit</button>
-                            <form method="POST"><input type="hidden" name="form_type" value="delete_app"><input type="hidden" name="delete_app_id" value="{{ app.app_id }}"><button type="submit" class="danger" style="margin:0; padding: 8px 15px; font-size: 13px; background-color:#ed4245;">Delete</button></form>
+                            <form method="POST"><input type="hidden" name="form_type" value="delete_app"><input type="hidden" name="delete_app_id" value="{{ app.app_id }}"><button type="submit" class="danger" style="margin:0; padding: 8px 15px; font-size: 13px; background-color:var(--danger);">Delete</button></form>
                         </div>
                     </div>
                 </div>
@@ -389,7 +357,7 @@
                         <form method="POST" style="display:inline;" onsubmit="return confirm('Delete this build?')">
                             <input type="hidden" name="form_type" value="delete_build">
                             <input type="hidden" name="delete_build_id" value="{{ build.id }}">
-                            <button type="submit" class="danger" style="background:#ed4245; font-size:12px; padding:5px 10px;">Delete</button>
+                            <button type="submit" class="danger" style="background:var(--danger); font-size:12px; padding:5px 10px;">Delete</button>
                         </form>
                     </div>
                 </div>
@@ -420,7 +388,7 @@
                     <div class="form-group"><label>Description</label><input type="text" name="build_desc" id="edit_build_desc"></div>
                     <div class="form-group"><label>Emoji</label><input type="text" name="build_emoji" id="edit_build_emoji"></div>
                     <button type="submit">Update Build</button>
-                    <button type="button" onclick="document.getElementById('editBuildModal').style.display='none'" style="background:#7f8c8d;">Cancel</button>
+                    <button type="button" onclick="document.getElementById('editBuildModal').style.display='none'" style="background:var(--bg-muted); color:var(--text-main);">Cancel</button>
                 </form>
             </div>
 

@@ -11,114 +11,147 @@
             padding: 0;
             box-sizing: border-box;
         }
-        
+
         body {
             font-family: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
-            background: #1e1f22;
-            color: #dbdee1;
-            padding: 20px;
+            background: #0d0e10;
+            color: #c8ccd4;
+            padding: 32px 20px;
+            position: relative;
+            min-height: 100vh;
         }
-        
+
+        body::before {
+            content: '';
+            position: fixed;
+            inset: -10%;
+            z-index: 0;
+            pointer-events: none;
+            background:
+                radial-gradient(600px circle at 15% 10%, rgba(88,101,242,0.07), transparent 60%),
+                radial-gradient(500px circle at 85% 80%, rgba(139,149,247,0.05), transparent 60%);
+        }
+
         .container {
             max-width: 1000px;
             margin: 0 auto;
-            background: #2b2d31;
-            border-radius: 12px;
+            background: #1f2127;
+            border: 1px solid rgba(255,255,255,0.06);
+            border-radius: 16px;
             overflow: hidden;
-            box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+            box-shadow: 0 16px 48px rgba(0,0,0,0.45);
+            position: relative;
+            z-index: 1;
+            animation: fadeInUp 0.4s cubic-bezier(0.16,1,0.3,1) both;
         }
-        
+        @keyframes fadeInUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+
         /* Header */
         .header {
-            background: #1e1f22;
-            padding: 30px;
-            border-bottom: 1px solid #3f4147;
+            background: linear-gradient(180deg, #1a1c20 0%, #16171b 100%);
+            padding: 34px 30px;
+            border-bottom: 1px solid rgba(255,255,255,0.06);
             text-align: center;
+            position: relative;
         }
-        
+        .header::before {
+            content: '';
+            position: absolute; top: 0; left: 0; right: 0; height: 2px;
+            background: linear-gradient(90deg, transparent, #5865F2, transparent);
+        }
+
         .header h1 {
-            font-size: 28px;
-            margin-bottom: 10px;
-            color: #5865F2;
+            font-size: 26px;
+            font-weight: 800;
+            letter-spacing: -0.02em;
+            margin-bottom: 12px;
+            color: #f0f1f3;
         }
-        
+
         .header .ticket-id {
-            background: #313338;
+            background: rgba(88,101,242,0.12);
+            border: 1px solid rgba(88,101,242,0.25);
+            color: #8b95f7;
             display: inline-block;
-            padding: 6px 12px;
-            border-radius: 6px;
-            font-family: monospace;
-            font-size: 14px;
-            margin-top: 10px;
+            padding: 6px 14px;
+            border-radius: 999px;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+            font-weight: 600;
         }
-        
+
         .info-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
             gap: 15px;
-            padding: 20px 30px;
-            background: #1e1f22;
-            border-bottom: 1px solid #3f4147;
+            padding: 22px 30px;
+            background: #16171b;
+            border-bottom: 1px solid rgba(255,255,255,0.06);
         }
-        
+
         .info-item {
             text-align: center;
         }
-        
+
         .info-label {
-            font-size: 11px;
+            font-size: 10.5px;
             text-transform: uppercase;
-            color: #949ba4;
-            letter-spacing: 0.5px;
-            margin-bottom: 5px;
+            color: #5a6070;
+            letter-spacing: 0.08em;
+            font-weight: 700;
+            margin-bottom: 6px;
         }
-        
+
         .info-value {
             font-size: 14px;
             font-weight: 600;
+            color: #dbdee1;
         }
-        
+
         /* Messages */
         .messages {
             padding: 20px 30px;
         }
-        
+
         .message {
             display: flex;
             gap: 16px;
-            padding: 16px;
-            margin-bottom: 8px;
-            border-radius: 8px;
-            transition: background 0.2s;
+            padding: 14px 16px;
+            margin-bottom: 4px;
+            border-radius: 10px;
+            transition: background 0.15s ease;
+            animation: fadeInUp 0.3s cubic-bezier(0.16,1,0.3,1) both;
         }
-        
+
         .message:hover {
-            background: #313338;
+            background: rgba(255,255,255,0.03);
         }
-        
+
         .avatar {
             width: 40px;
             height: 40px;
             border-radius: 50%;
-            background: #5865F2;
+            background: linear-gradient(135deg, #5865F2, #8b95f7);
             display: flex;
             align-items: center;
             justify-content: center;
-            font-weight: bold;
+            font-weight: 700;
             flex-shrink: 0;
+            box-shadow: 0 0 0 3px rgba(255,255,255,0.04);
         }
-        
+
         .avatar img {
             width: 100%;
             height: 100%;
             border-radius: 50%;
             object-fit: cover;
         }
-        
+
         .message-content {
             flex: 1;
+            min-width: 0;
         }
-        
+
         .message-header {
             display: flex;
             align-items: baseline;
@@ -126,83 +159,93 @@
             margin-bottom: 6px;
             flex-wrap: wrap;
         }
-        
+
         .author-name {
-            font-weight: 600;
-            color: #dbdee1;
+            font-weight: 700;
+            color: #f0f1f3;
+            font-size: 14.5px;
         }
-        
+
         .timestamp {
             font-size: 11px;
-            color: #949ba4;
+            color: #5a6070;
         }
-        
+
         .message-text {
-            font-size: 15px;
-            line-height: 1.4;
+            font-size: 14.5px;
+            line-height: 1.5;
             word-wrap: break-word;
+            color: #c8ccd4;
         }
-        
+
         .message-text a {
-            color: #5865F2;
+            color: #8b95f7;
             text-decoration: none;
         }
-        
+
         .message-text a:hover {
             text-decoration: underline;
         }
-        
+
         .attachment {
-            background: #1e1f22;
-            padding: 8px 12px;
-            border-radius: 6px;
+            background: #16171b;
+            border: 1px solid rgba(255,255,255,0.06);
+            padding: 8px 14px;
+            border-radius: 8px;
             margin-top: 8px;
             display: inline-block;
             font-size: 13px;
         }
-        
+
         .attachment a {
-            color: #5865F2;
+            color: #8b95f7;
             text-decoration: none;
         }
-        
+
         .system-message {
-            background: #313338;
-            opacity: 0.8;
+            background: rgba(255,255,255,0.02);
+            opacity: 0.85;
         }
-        
+
         .system-message .message-text {
             font-style: italic;
-            color: #949ba4;
+            color: #5a6070;
         }
-        
+
         /* Footer */
         .footer {
-            background: #1e1f22;
-            padding: 20px 30px;
+            background: #16171b;
+            padding: 22px 30px;
             text-align: center;
-            border-top: 1px solid #3f4147;
+            border-top: 1px solid rgba(255,255,255,0.06);
             font-size: 12px;
-            color: #949ba4;
+            color: #5a6070;
         }
-        
+
         /* Code blocks */
         pre {
-            background: #1e1f22;
+            background: #16171b;
+            border: 1px solid rgba(255,255,255,0.06);
             padding: 12px;
-            border-radius: 6px;
+            border-radius: 8px;
             overflow-x: auto;
             font-size: 13px;
             margin-top: 8px;
         }
-        
+
         code {
             font-family: 'Courier New', monospace;
         }
-        
+
+        /* thin scrollbar for the whole page */
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-thumb { background: #363b47; border-radius: 4px; }
+
         @media (max-width: 600px) {
+            body { padding: 0; }
             .container {
                 border-radius: 0;
+                border: none;
             }
             .messages {
                 padding: 12px;

@@ -30,14 +30,32 @@
     --danger:       #ef4444;
     --danger-tint:  rgba(239, 68, 68, 0.1);
     --success:      #22c55e;
+    --success-tint: rgba(34, 197, 94, 0.1);
     --warning:      #f59e0b;
+    --warning-tint: rgba(245, 158, 11, 0.1);
+    --info:         #3b82f6;
+    --info-tint:    rgba(59, 130, 246, 0.1);
+    --orange:       #f0883e;
 
     --r-sm: 6px;
     --r-md: 10px;
     --r-lg: 14px;
+    --r-xl: 20px;
 
     --sidebar-w: 220px;
     --transition: 0.14s ease;
+    --transition-slow: 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+    --shadow-soft: 0 8px 24px rgba(0,0,0,0.35);
+    --shadow-lift: 0 16px 40px rgba(0,0,0,0.5);
+
+    /* legacy alias support — older page styles reference these names */
+    --bg-main:      var(--bg-base);
+    --bg-card:      var(--bg-surface);
+    --bg-sidebar:   var(--bg-raised);
+    --accent-hover: var(--accent-mid);
+    --green:        var(--success);
+    --yellow:       var(--warning);
+    --red:          var(--danger);
 }
 
 /* ═══════════════════════════════════════════════
@@ -59,6 +77,36 @@ body {
     -webkit-font-smoothing: antialiased;
     font-size: 14px;
     line-height: 1.55;
+    position: relative;
+}
+
+/* Ambient drifting glow — sits behind everything, adds depth without touching markup */
+body::before {
+    content: '';
+    position: fixed;
+    inset: -10%;
+    z-index: 0;
+    pointer-events: none;
+    background:
+        radial-gradient(600px circle at 15% 20%, var(--accent-tint), transparent 60%),
+        radial-gradient(500px circle at 85% 75%, rgba(139,149,247,0.05), transparent 60%);
+    animation: driftGlow 22s ease-in-out infinite alternate;
+    opacity: 0.9;
+}
+@keyframes driftGlow {
+    0%   { transform: translate(0, 0) scale(1); }
+    100% { transform: translate(3%, -3%) scale(1.06); }
+}
+
+/* Gentle entrance for the whole app shell */
+.sidebar, .content, .t-content {
+    animation: fadeInUp 0.45s var(--transition-slow) both;
+    position: relative;
+    z-index: 1;
+}
+@keyframes fadeInUp {
+    from { opacity: 0; transform: translateY(6px); }
+    to   { opacity: 1; transform: translateY(0); }
 }
 
 /* ═══════════════════════════════════════════════
@@ -130,6 +178,28 @@ body {
     background: var(--accent-tint);
     border-left-color: var(--accent);
     font-weight: 600;
+    box-shadow: inset 0 0 24px -8px var(--accent-glow);
+}
+
+.nav-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+/* Logout — pinned to the bottom of the sidebar (sidebar is a flex column) */
+.nav-item.logout {
+    margin-top: auto;
+    color: #f87171;
+    border-top: 1px solid var(--border);
+    border-radius: 0;
+    padding-top: 14px;
+    margin-left: 0;
+    margin-right: 0;
+}
+.nav-item.logout:hover {
+    color: #f87171;
+    background: var(--danger-tint);
 }
 
 /* ═══════════════════════════════════════════════
@@ -204,9 +274,14 @@ body {
     opacity: 0;
     transition: opacity 0.2s;
 }
-.card.active { display: block; }
+.card.active { display: block; animation: cardIn 0.32s var(--transition-slow) both; }
 .card.active::before { opacity: 1; }
-.card:hover { border-color: rgba(255,255,255,0.1); }
+.card:hover { border-color: rgba(255,255,255,0.1); box-shadow: var(--shadow-soft); }
+
+@keyframes cardIn {
+    from { opacity: 0; transform: translateY(8px) scale(0.99); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
+}
 
 .card h3 {
     font-size: 16px;
@@ -382,6 +457,20 @@ button:hover {
 }
 button:active { transform: translateY(0); box-shadow: none; }
 
+/* Shine sweep on primary buttons */
+button:not(.danger)::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(115deg, transparent 20%, rgba(255,255,255,0.22) 40%, transparent 60%);
+    transform: translateX(-120%);
+    transition: transform 0.55s ease;
+    pointer-events: none;
+    border-radius: inherit;
+}
+button:not(.danger):hover::after { transform: translateX(120%); }
+button:not(.danger) { overflow: hidden; }
+
 button.danger {
     background: transparent;
     color: var(--danger);
@@ -475,6 +564,29 @@ button.danger:hover {
 }
 .manage-link:hover { color: #fff; }
 
+/* Server card variant for guilds the bot hasn't been added to yet */
+.server-card.not-added { cursor: default; opacity: 0.85; }
+.server-card.not-added .server-icon { filter: grayscale(0.6); opacity: 0.6; }
+.server-card.not-added:hover { transform: none; box-shadow: none; border-color: var(--border); }
+.server-card.not-added:hover::after { opacity: 0; }
+.add-link {
+    display: inline-flex; align-items: center; gap: 5px;
+    color: var(--text-muted);
+    text-decoration: none;
+    font-weight: 600;
+    font-size: 12.5px;
+    letter-spacing: 0.02em;
+    transition: color var(--transition);
+    position: relative;
+    z-index: 1;
+}
+.add-link:hover { color: var(--accent-light); }
+.not-added-tag {
+    display: inline-block;
+    font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em;
+    color: var(--text-faint); margin-bottom: 10px;
+}
+
 /* ═══════════════════════════════════════════════
    DIVIDERS
 ═══════════════════════════════════════════════ */
@@ -531,6 +643,7 @@ hr {
 }
 .toast.success { background: rgba(34,197,94,0.15); color: #4ade80; border-color: rgba(34,197,94,0.3); }
 .toast.error   { background: rgba(239,68,68,0.15); color: #f87171; border-color: rgba(239,68,68,0.3); }
+.toast.info    { background: rgba(59,130,246,0.15); color: #60a5fa; border-color: rgba(59,130,246,0.3); }
 
 @keyframes slideUp {
     from { opacity: 0; transform: translateY(12px); }
@@ -548,3 +661,179 @@ hr {
 /* scrollbar for multiselect */
 .multiselect-container::-webkit-scrollbar { width: 4px; }
 .multiselect-container::-webkit-scrollbar-thumb { background: var(--text-faint); border-radius: 4px; }
+
+/* ═══════════════════════════════════════════════
+   STAT CARDS  (commands / builds dashboards)
+═══════════════════════════════════════════════ */
+.stat-card {
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: var(--r-lg);
+    padding: 16px 24px;
+    position: relative;
+    overflow: hidden;
+    transition: transform var(--transition-slow), border-color var(--transition), box-shadow var(--transition-slow);
+}
+.stat-card::before {
+    content: '';
+    position: absolute; top: 0; left: 0; right: 0; height: 2px;
+    background: linear-gradient(90deg, var(--accent) 0%, transparent 100%);
+    opacity: 0; transition: opacity 0.2s;
+}
+.stat-card:hover {
+    transform: translateY(-3px);
+    border-color: rgba(88,101,242,0.35);
+    box-shadow: var(--shadow-soft);
+}
+.stat-card:hover::before { opacity: 1; }
+.stat-number { font-size: 28px; font-weight: 800; color: var(--accent-light); letter-spacing: -0.02em; }
+.stat-number.green  { color: var(--success); }
+.stat-number.yellow { color: var(--warning); }
+.stat-number.orange { color: var(--orange); }
+.stat-label { font-size: 11.5px; color: var(--text-muted); margin-top: 5px; text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600; }
+
+/* ═══════════════════════════════════════════════
+   BADGES / PILLS  (shared across commands, tickets, builds)
+═══════════════════════════════════════════════ */
+.command-badge, .status-badge, .sbadge {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 999px;
+    font-size: 10.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    border: 1px solid transparent;
+}
+.badge-admin      { background: var(--danger-tint);  color: #f87171; border-color: rgba(239,68,68,0.25); }
+.badge-mod        { background: var(--warning-tint); color: #fbbf24; border-color: rgba(245,158,11,0.25); }
+.badge-staff      { background: var(--info-tint);    color: #60a5fa; border-color: rgba(59,130,246,0.25); }
+.badge-custom     { background: var(--success-tint); color: #4ade80; border-color: rgba(34,197,94,0.25); }
+.badge-unpaid     { background: var(--danger-tint);  color: #f87171; }
+.badge-confirmed  { background: var(--warning-tint); color: #fbbf24; }
+.badge-claimed    { background: var(--success-tint); color: #4ade80; }
+.badge-completed  { background: rgba(255,255,255,0.06); color: var(--text-muted); }
+.badge-cancelled  { background: var(--danger-tint);  color: #f87171; opacity: 0.7; }
+
+.perm-tag {
+    background: var(--accent-tint);
+    border: 1px solid rgba(88,101,242,0.25);
+    color: var(--accent-light);
+    padding: 4px 11px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 600;
+}
+.perm-tag-default { background: rgba(255,255,255,0.05); color: var(--text-muted); border-color: var(--border); }
+
+/* ═══════════════════════════════════════════════
+   STATUS DOTS
+═══════════════════════════════════════════════ */
+.status-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; box-shadow: 0 0 0 3px rgba(255,255,255,0.03); }
+.status-dot.unpaid, .status-dot.cancelled { background: var(--danger); }
+.status-dot.confirmed { background: var(--warning); }
+.status-dot.claimed { background: var(--success); box-shadow: 0 0 0 3px var(--success-tint); }
+.status-dot.completed { background: var(--text-muted); }
+.status-dot.pulse { animation: dotPulse 1.6s ease-in-out infinite; }
+@keyframes dotPulse { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
+
+/* ═══════════════════════════════════════════════
+   TABS  (builds dashboard)
+═══════════════════════════════════════════════ */
+.tabs { display: flex; gap: 4px; margin-bottom: 30px; border-bottom: 1px solid var(--border); }
+.tab-btn {
+    padding: 10px 20px;
+    background: none; border: none;
+    color: var(--text-muted);
+    font-size: 13.5px; font-weight: 600;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+    font-family: inherit;
+    transition: color var(--transition), border-color var(--transition);
+}
+.tab-btn:hover { color: var(--text-main); }
+.tab-btn.active { color: var(--accent-light); border-bottom-color: var(--accent); }
+.tab-panel { display: none; animation: cardIn 0.3s var(--transition-slow) both; }
+.tab-panel.active { display: block; }
+
+/* ═══════════════════════════════════════════════
+   FILTER CHIPS / SEARCH
+═══════════════════════════════════════════════ */
+.filter-chip, .filter-btn {
+    padding: 6px 15px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-muted);
+    transition: all var(--transition);
+}
+.filter-chip:hover, .filter-btn:hover { color: var(--text-main); border-color: rgba(255,255,255,0.15); }
+.filter-chip.active, .filter-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; box-shadow: 0 3px 10px var(--accent-glow); }
+
+.search-box input, .filter-bar input {
+    width: 100%;
+    padding: 10px 14px;
+    background: var(--input-bg);
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
+    color: var(--text-main);
+    font-size: 13.5px;
+    font-family: inherit;
+    transition: border-color var(--transition), box-shadow var(--transition);
+}
+.search-box input:focus, .filter-bar input:focus {
+    outline: none; border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-glow);
+}
+
+/* ═══════════════════════════════════════════════
+   MODALS  (role selector, delete confirm, ticket post)
+═══════════════════════════════════════════════ */
+.modal-overlay, .role-selector, .m-overlay {
+    display: none;
+    position: fixed; inset: 0;
+    background: rgba(8,9,12,0.72);
+    backdrop-filter: blur(4px);
+    z-index: 1000;
+    align-items: center;
+    justify-content: center;
+    animation: fadeIn 0.18s ease both;
+}
+.modal-overlay.open, .role-selector.active, .m-overlay.open { display: flex; }
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+.modal, .role-selector-content, .m-box {
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: var(--r-lg);
+    box-shadow: var(--shadow-lift);
+    animation: modalIn 0.22s var(--transition-slow) both;
+}
+@keyframes modalIn {
+    from { opacity: 0; transform: translateY(10px) scale(0.97); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* ═══════════════════════════════════════════════
+   EMPTY STATES
+═══════════════════════════════════════════════ */
+.empty-state, .t-empty {
+    text-align: center;
+    padding: 48px 20px;
+    color: var(--text-muted);
+}
+.empty-state .emoji { font-size: 40px; margin-bottom: 12px; display: block; animation: floaty 3s ease-in-out infinite; }
+@keyframes floaty { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }
+
+/* ═══════════════════════════════════════════════
+   RESPONSIVE
+═══════════════════════════════════════════════ */
+@media (max-width: 860px) {
+    body { flex-direction: column; height: auto; overflow: auto; }
+    .sidebar { width: 100%; border-right: none; border-bottom: 1px solid var(--border); }
+    .content, .t-content { padding: 24px; }
+}

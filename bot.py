@@ -21,6 +21,7 @@ intents.guilds = True
 intents.reactions = True
 
 COGS = [
+    'cogs.stats',
     'cogs.tickets',
     'cogs.moderation',
     'cogs.giveaway',
@@ -36,6 +37,8 @@ COGS = [
     'cogs.afk',
     'cogs.mcpay',
     'cogs.mc_link',        # per-user Minecraft account linking (/link, /unlink, /mc)
+    'cogs.invites',
+    'cogs.embed_activity',  # /embed sender + /activity presence setter
 
 ]
 
