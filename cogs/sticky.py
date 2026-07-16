@@ -44,11 +44,17 @@ class Sticky(commands.Cog):
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
-        if message.author.bot or not message.guild: return
+        if not message.guild: return
         channel_id = message.channel.id
         if channel_id not in _stickies: return
 
         sticky = _stickies[channel_id]
+
+        # Ignore the sticky message itself (prevents delete/repost infinite loop),
+        # but still react to any other message, including other bot/embed messages.
+        if message.id == sticky["message_id"]:
+            return
+
         try:
             old_msg = await message.channel.fetch_message(sticky["message_id"])
             await old_msg.delete()

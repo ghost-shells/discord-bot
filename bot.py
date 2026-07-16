@@ -22,6 +22,7 @@ intents.reactions = True
 
 COGS = [
     'cogs.stats',
+    'cogs.vouches',
     'cogs.tickets',
     'cogs.moderation',
     'cogs.giveaway',

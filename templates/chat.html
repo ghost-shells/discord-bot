@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Live Chat – {{ guild_name }}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <style>
+    body { margin:0; height:100vh; overflow:hidden; }
+    .chat-shell { display:flex; height:100vh; }
+
+    .chan-rail {
+      width:220px; background:var(--bg-sidebar); border-right:1px solid var(--border);
+      display:flex; flex-direction:column; overflow-y:auto; flex-shrink:0;
+    }
+    .chan-rail h2 { padding:16px 16px 12px; margin:0; font-size:15px; color:var(--text-main); border-bottom:1px solid var(--border); }
+    .chan-back { padding:10px 16px; font-size:12.5px; color:var(--text-muted); cursor:pointer; border-bottom:1px solid var(--border); }
+    .chan-back:hover { color:var(--text-main); }
+    .chan-item { padding:9px 16px; font-size:13.5px; color:var(--text-muted); cursor:pointer; border-left:3px solid transparent; }
+    .chan-item:hover { background:var(--bg-main); color:var(--text-main); }
+    .chan-item.active { background:var(--bg-main); color:var(--text-bright); border-left-color:var(--accent); font-weight:600; }
+
+    .chat-main { flex:1; display:flex; flex-direction:column; min-width:0; background:var(--bg-base); }
+    .chat-header { padding:14px 22px; border-bottom:1px solid var(--border); font-weight:700; color:var(--text-bright); font-size:15px; flex-shrink:0; }
+    .chat-empty-state { flex:1; display:flex; align-items:center; justify-content:center; color:var(--text-muted); font-size:14px; }
+
+    .messages { flex:1; overflow-y:auto; padding:16px 22px; display:flex; flex-direction:column; gap:2px; }
+    .msg { display:flex; gap:12px; padding:6px 8px; border-radius:8px; position:relative; }
+    .msg:hover { background:rgba(255,255,255,0.02); }
+    .msg:hover .msg-actions { opacity:1; }
+    .msg-avatar { width:36px; height:36px; border-radius:50%; flex-shrink:0; margin-top:2px; }
+    .msg-body { flex:1; min-width:0; }
+    .msg-head { display:flex; align-items:baseline; gap:8px; }
+    .msg-author { font-weight:700; font-size:14px; color:var(--text-bright); }
+    .msg-author.self { color:var(--accent-light); }
+    .msg-bot-tag { font-size:9.5px; background:var(--accent); color:#fff; padding:1px 5px; border-radius:4px; font-weight:700; }
+    .msg-time { font-size:11px; color:var(--text-faint); }
+    .msg-reply { font-size:12px; color:var(--text-muted); background:var(--bg-overlay); border-left:2px solid var(--accent); padding:3px 8px; border-radius:4px; margin-bottom:4px; max-width:fit-content; }
+    .msg-text { font-size:14px; color:var(--text-main); line-height:1.5; white-space:pre-wrap; word-break:break-word; }
+    .msg-attachment { font-size:12.5px; margin-top:4px; }
+    .msg-attachment a { color:var(--accent-light); }
+    .msg-embed { border-left:3px solid var(--accent); background:var(--bg-overlay); padding:8px 12px; border-radius:6px; margin-top:6px; font-size:13px; max-width:420px; }
+    .msg-embed strong { color:var(--text-bright); }
+
+    .msg-actions { position:absolute; top:-10px; right:8px; display:flex; gap:4px; opacity:0; transition:opacity .12s; background:var(--bg-surface); border:1px solid var(--border); border-radius:6px; padding:2px; }
+    .msg-actions button { background:none; border:none; color:var(--text-muted); cursor:pointer; font-size:13px; padding:4px 6px; border-radius:4px; }
+    .msg-actions button:hover { background:var(--bg-muted); color:var(--text-bright); }
+
+    .composer { border-top:1px solid var(--border); padding:14px 22px 18px; flex-shrink:0; }
+    .reply-chip { display:flex; align-items:center; justify-content:space-between; background:var(--bg-overlay); border-left:2px solid var(--accent); padding:6px 10px; border-radius:6px; font-size:12.5px; color:var(--text-muted); margin-bottom:8px; }
+    .reply-chip button { background:none; border:none; color:var(--text-muted); cursor:pointer; font-size:14px; }
+    .composer-row { display:flex; gap:10px; align-items:flex-end; }
+    .composer-row textarea { flex:1; resize:none; max-height:140px; }
+    .composer-row button { flex-shrink:0; }
+
+    .fwd-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,.65); z-index:200; align-items:center; justify-content:center; backdrop-filter:blur(3px); }
+    .fwd-overlay.open { display:flex; }
+    .fwd-box { background:var(--bg-surface); border:1px solid var(--border); border-radius:var(--r-lg); padding:24px; width:100%; max-width:380px; }
+    .fwd-box h3 { margin:0 0 14px; font-size:15px; color:var(--text-bright); }
+    .fwd-footer { margin-top:16px; display:flex; gap:8px; justify-content:flex-end; }
+  </style>
+</head>
+<body>
+<div class="chat-shell">
+  <div class="chan-rail">
+    <div class="chan-back" onclick="window.location.href='/dashboard/{{ guild_id }}'">← Back to Settings</div>
+    <h2>💬 {{ guild_name }}</h2>
+    {% for c in channels %}
+    <div class="chan-item" data-id="{{ c.id }}" data-name="{{ c.name }}" onclick="selectChannel('{{ c.id }}','{{ c.name }}', this)">
+      #{{ c.name }}
+    </div>
+    {% endfor %}
+  </div>
+
+  <div class="chat-main">
+    <div class="chat-header" id="chat-header">Pick a channel to start</div>
+    <div class="chat-empty-state" id="chat-empty">Select a channel on the left — you'll see recent messages and can reply, send, or forward as the bot.</div>
+    <div class="messages" id="messages" style="display:none;"></div>
+
+    <div class="composer" id="composer" style="display:none;">
+      <div class="reply-chip" id="reply-chip" style="display:none;">
+        <span id="reply-chip-text"></span>
+        <button onclick="clearReply()">✕</button>
+      </div>
+      <div class="composer-row">
+        <textarea id="composer-input" rows="1" placeholder="Message as the bot… (Enter to send, Shift+Enter for newline)"></textarea>
+        <button class="btn" onclick="sendMessage()">Send</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Forward modal -->
+<div class="fwd-overlay" id="fwd-overlay">
+  <div class="fwd-box">
+    <h3>↪️ Forward message</h3>
+    <label class="t-label" style="display:block;font-size:11px;text-transform:uppercase;color:var(--text-muted);margin-bottom:6px;">Send a labelled copy to</label>
+    <select id="fwd-channel-select">
+      {% for c in channels %}
+      <option value="{{ c.id }}">#{{ c.name }}</option>
+      {% endfor %}
+    </select>
+    <div class="fwd-footer">
+      <button class="btn" style="background:var(--bg-muted);color:var(--text-main);" onclick="closeForward()">Cancel</button>
+      <button class="btn" onclick="confirmForward()">Forward</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  const guildId = "{{ guild_id }}";
+  let currentChannelId = null;
+  let currentChannelName = null;
+  let lastMessageId = null;
+  let replyTo = null;
+  let pollTimer = null;
+  let forwardTarget = null; // { channel_id, content, author_name, attachment_urls }
+
+  function selectChannel(id, name, el) {
+    currentChannelId = id;
+    currentChannelName = name;
+    lastMessageId = null;
+    clearReply();
+    document.querySelectorAll('.chan-item').forEach(x => x.classList.remove('active'));
+    el.classList.add('active');
+    document.getElementById('chat-header').textContent = '#' + name;
+    document.getElementById('chat-empty').style.display = 'none';
+    document.getElementById('messages').style.display = 'flex';
+    document.getElementById('composer').style.display = 'block';
+    document.getElementById('messages').innerHTML = '';
+    loadInitial();
+    if (pollTimer) clearInterval(pollTimer);
+    pollTimer = setInterval(pollNew, 3000);
+  }
+
+  function fmtTime(iso) {
+    try {
+      const d = new Date(iso);
+      return d.toLocaleString(undefined, { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' });
+    } catch { return ''; }
+  }
+
+  function renderMessage(m) {
+    const wrap = document.createElement('div');
+    wrap.className = 'msg';
+    wrap.dataset.id = m.id;
+
+    const replyHtml = m.reply_to
+      ? `<div class="msg-reply">↩ Replying to <strong>${m.reply_to.author}</strong>: ${escapeHtml(m.reply_to.content)}</div>`
+      : '';
+
+    const embedsHtml = (m.embeds || []).map(e => `
+      <div class="msg-embed">
+        ${e.title ? `<strong>${escapeHtml(e.title)}</strong><br>` : ''}
+        ${e.description ? escapeHtml(e.description) : ''}
+      </div>`).join('');
+
+    const attHtml = (m.attachments || []).map(a =>
+      `<div class="msg-attachment">📎 <a href="${a.url}" target="_blank">${escapeHtml(a.filename)}</a></div>`
+    ).join('');
+
+    wrap.innerHTML = `
+      <img class="msg-avatar" src="${m.author.avatar_url}" alt="">
+      <div class="msg-body">
+        ${replyHtml}
+        <div class="msg-head">
+          <span class="msg-author ${m.is_bot_self ? 'self' : ''}">${escapeHtml(m.author.username)}</span>
+          ${m.author.bot ? '<span class="msg-bot-tag">BOT</span>' : ''}
+          <span class="msg-time">${fmtTime(m.timestamp)}</span>
+        </div>
+        ${m.content ? `<div class="msg-text">${escapeHtml(m.content)}</div>` : ''}
+        ${embedsHtml}
+        ${attHtml}
+      </div>
+      <div class="msg-actions">
+        <button title="Reply" onclick='startReply(${JSON.stringify(m.id)}, ${JSON.stringify(m.author.username)}, ${JSON.stringify(m.content || "")})'>↩</button>
+        <button title="Forward" onclick='openForward(${JSON.stringify(m.author.username)}, ${JSON.stringify(m.content || "")}, ${JSON.stringify((m.attachments||[]).map(a=>a.url))})'>↪️</button>
+        ${m.is_bot_self ? `<button title="Delete" onclick='deleteMessage(${JSON.stringify(m.id)})'>🗑️</button>` : ''}
+      </div>
+    `;
+    return wrap;
+  }
+
+  function escapeHtml(s) {
+    const d = document.createElement('div');
+    d.textContent = s;
+    return d.innerHTML;
+  }
+
+  async function loadInitial() {
+    const r = await fetch(`/dashboard/${guildId}/console/chat/messages?channel_id=${currentChannelId}`);
+    const data = await r.json();
+    const box = document.getElementById('messages');
+    box.innerHTML = '';
+    if (data.error) {
+      box.innerHTML = `<div style="padding:20px;color:#f87171;font-size:13.5px;">⚠️ ${escapeHtml(data.error)}</div>`;
+      lastMessageId = null;
+      return;
+    }
+    (data.messages || []).forEach(m => box.appendChild(renderMessage(m)));
+    if (data.messages && data.messages.length) lastMessageId = data.messages[data.messages.length - 1].id;
+    box.scrollTop = box.scrollHeight;
+  }
+
+  async function pollNew() {
+    if (!currentChannelId || !lastMessageId) return;
+    const r = await fetch(`/dashboard/${guildId}/console/chat/messages?channel_id=${currentChannelId}&after=${lastMessageId}`);
+    const data = await r.json();
+    if (data.error || !data.messages || !data.messages.length) return;
+    const box = document.getElementById('messages');
+    const wasNearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 80;
+    data.messages.forEach(m => box.appendChild(renderMessage(m)));
+    lastMessageId = data.messages[data.messages.length - 1].id;
+    if (wasNearBottom) box.scrollTop = box.scrollHeight;
+  }
+
+  function startReply(id, author, content) {
+    replyTo = id;
+    document.getElementById('reply-chip').style.display = 'flex';
+    document.getElementById('reply-chip-text').textContent = `Replying to ${author}: ${content.slice(0, 60)}`;
+    document.getElementById('composer-input').focus();
+  }
+  function clearReply() {
+    replyTo = null;
+    document.getElementById('reply-chip').style.display = 'none';
+  }
+
+  async function sendMessage() {
+    const input = document.getElementById('composer-input');
+    const content = input.value.trim();
+    if (!content || !currentChannelId) return;
+    input.value = '';
+    const r = await fetch(`/dashboard/${guildId}/console/chat/send`, {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ channel_id: currentChannelId, content, reply_to: replyTo }),
+    });
+    const data = await r.json();
+    clearReply();
+    if (data.ok && data.message) {
+      const box = document.getElementById('messages');
+      box.appendChild(renderMessage(data.message));
+      lastMessageId = data.message.id;
+      box.scrollTop = box.scrollHeight;
+    } else {
+      alert('Failed to send: ' + (data.error || 'unknown error'));
+    }
+  }
+
+  document.addEventListener('DOMContentLoaded', () => {
+    const input = document.getElementById('composer-input');
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+    });
+  });
+
+  async function deleteMessage(id) {
+    if (!confirm('Delete this message?')) return;
+    const r = await fetch(`/dashboard/${guildId}/console/chat/delete`, {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ channel_id: currentChannelId, message_id: id }),
+    });
+    const data = await r.json();
+    if (data.ok) {
+      const el = document.querySelector(`.msg[data-id="${id}"]`);
+      if (el) el.remove();
+    } else {
+      alert('Failed to delete: ' + (data.error || 'unknown error'));
+    }
+  }
+
+  function openForward(authorName, content, attachmentUrls) {
+    forwardTarget = { author_name: authorName, content, attachment_urls: attachmentUrls };
+    document.getElementById('fwd-overlay').classList.add('open');
+  }
+  function closeForward() {
+    forwardTarget = null;
+    document.getElementById('fwd-overlay').classList.remove('open');
+  }
+  async function confirmForward() {
+    const destChannelId = document.getElementById('fwd-channel-select').value;
+    const r = await fetch(`/dashboard/${guildId}/console/chat/forward`, {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({
+        source_channel_id: currentChannelId,
+        dest_channel_id: destChannelId,
+        author_name: forwardTarget.author_name,
+        content: forwardTarget.content,
+        attachment_urls: forwardTarget.attachment_urls,
+      }),
+    });
+    const data = await r.json();
+    closeForward();
+    if (!data.ok) alert('Failed to forward: ' + (data.error || 'unknown error'));
+    else alert('Forwarded ✅');
+  }
+</script>
+</body>
+</html>

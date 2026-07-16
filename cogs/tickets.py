@@ -62,6 +62,14 @@ def get_creator_name(channel: discord.TextChannel) -> str:
 def is_ticket_channel(channel: discord.TextChannel) -> bool:
     return any(channel.name.startswith(p) for p in TICKET_PREFIXES)
 
+def has_ticket_topic(channel: discord.TextChannel) -> bool:
+    """Rename-proof ticket check. Every ticket type (regular tickets, application
+    tickets, and giveaway claim tickets) stamps 'Ticket by X | Category' or
+    'Buyer: X | ...' into the channel topic when it's created, and that topic
+    survives channel renames — unlike the name-prefix check in is_ticket_channel."""
+    topic = channel.topic or ""
+    return "Ticket by " in topic or "Buyer: " in topic
+
 async def check_existing_ticket(interaction: discord.Interaction) -> bool:
     uname = interaction.user.name.lower()
     for ch in interaction.guild.text_channels:
@@ -535,7 +543,7 @@ class Tickets(commands.Cog):
     # /close — close current ticket
     @app_commands.command(name="close", description="Close the current ticket")
     async def close(self, interaction: discord.Interaction):
-        if not is_ticket_channel(interaction.channel):
+        if not has_ticket_topic(interaction.channel):
             return await interaction.response.send_message(
                 "❌ This can only be used in ticket channels.", ephemeral=True
             )

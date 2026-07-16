@@ -171,11 +171,13 @@ class ApplicationActionView(discord.ui.View):
 
         channel = await guild.create_text_channel(name=f"app-{uname}", category=cat, overwrites=overwrites, topic=f"Ticket by {applicant.name} | Application")
 
-        from cogs.tickets_base import TicketView
+        from cogs.tickets import TicketView
         embed = discord.Embed(title="🎫 Application Ticket", description=f"### Discussion with {applicant.mention}\n\n━━━━━━━━━━━━━━━━━━", color=0x2b2d31, timestamp=datetime.now(timezone.utc))
         embed.add_field(name="Applicant", value=applicant.mention, inline=True)
         embed.add_field(name="Category", value="Application", inline=True)
         embed.set_footer(text=f"Channel ID: {channel.id}")
+        if guild.icon:
+            embed.set_thumbnail(url=guild.icon.url)
 
         view = TicketView()
         await channel.send(embed=embed, view=view)

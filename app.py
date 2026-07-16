@@ -1263,5 +1263,516 @@ def tickets_dashboard(guild_id):
         panels=panels,
     )
 
+# ── Bot Console: run bot actions on-demand from the dashboard ───────────────
+
+def _discord_api(method, path, reason=None, **kwargs):
+    """Thin wrapper around the Discord REST API using the bot token."""
+    headers = {"Authorization": f"Bot {BOT_TOKEN}", "User-Agent": "DashboardBot/1.0"}
+    if reason:
+        headers["X-Audit-Log-Reason"] = reason[:512]
+    return requests.request(method, f"https://discord.com/api/v10{path}", headers=headers, timeout=10, **kwargs)
+
+
+def _discord_err(r):
+    """Turn a failed Discord API response into a human-readable message."""
+    try:
+        body = r.json()
+    except Exception:
+        return r.text[:300] or f"HTTP {r.status_code}"
+    msg = body.get("message", f"HTTP {r.status_code}")
+    if r.status_code == 403:
+        return f"{msg} — the bot is missing a permission here."
+    if r.status_code == 404:
+        return f"{msg} — that channel/message may not exist anymore."
+    return msg
+
+
+def _require_guild_access_json(guild_id):
+    """For AJAX/JSON routes: verify the session can manage this guild.
+    Returns a Flask response to short-circuit with if access fails, else None.
+    Logs the mismatch so a stale-session issue is provable from the logs."""
+    if "access_token" not in session:
+        return jsonify({"ok": False, "error": "Your session has expired. Please log out and log back in."}), 401
+
+    session_guild_ids = [int(g["id"]) for g in session.get("guilds", [])]
+    if guild_id not in session_guild_ids:
+        logger.warning(
+            f"Guild access check failed for guild {guild_id}. "
+            f"Session currently has access to: {session_guild_ids}. "
+            f"discord_user={session.get('discord_user')}"
+        )
+        return jsonify({
+            "ok": False,
+            "error": "Your session no longer shows access to this server (permissions changed, or the "
+                     "dashboard was redeployed since you logged in). Please log out and log back in.",
+        }), 403
+    return None
+
+
+def _log_console_action(guild_id, action, target_id, detail, ok, error=None):
+    if db is None:
+        return
+    actor = session.get("discord_user", {})
+    try:
+        db["console_actions"].insert_one({
+            "guild_id": guild_id,
+            "action": action,
+            "target_id": target_id,
+            "detail": detail,
+            "ok": ok,
+            "error": error,
+            "actor_id": actor.get("id"),
+            "actor_name": actor.get("username"),
+            "timestamp": datetime.utcnow(),
+        })
+    except Exception as e:
+        logger.error(f"Failed to log console action: {e}")
+
+
+@app.route("/dashboard/<int:guild_id>/console", methods=["GET", "POST"])
+def bot_console(guild_id):
+    """Live control panel: send messages/DMs and moderate members as the bot."""
+    if "access_token" not in session:
+        return redirect("/")
+
+    user_guild_ids = [int(g["id"]) for g in session.get("guilds", [])]
+    if guild_id not in user_guild_ids:
+        abort(403)
+
+    if not bot_in_guild(guild_id):
+        return redirect(f"/dashboard?bot_missing={guild_id}")
+
+    if not BOT_TOKEN:
+        return "<h1>Error: DISCORD_BOT_TOKEN or DISCORD_TOKEN is missing from environment variables!</h1>", 500
+
+    if request.method == "POST":
+        form_type = request.form.get("form_type")
+        user_id = request.form.get("user_id", "").strip()
+        ok, error, detail = False, None, ""
+
+        try:
+            if form_type == "send_message":
+                channel_id = request.form.get("channel_id")
+                content = request.form.get("content", "").strip()
+                embed_title = request.form.get("embed_title", "").strip()
+                embed_desc = request.form.get("embed_description", "").strip()
+                embed_color = request.form.get("embed_color", "#5865f2").lstrip("#")
+
+                payload = {}
+                if content:
+                    payload["content"] = content
+                if embed_title or embed_desc:
+                    try:
+                        color = int(embed_color, 16)
+                    except ValueError:
+                        color = 0x5865F2
+                    embed = {"color": color}
+                    if embed_title:
+                        embed["title"] = embed_title
+                    if embed_desc:
+                        embed["description"] = embed_desc
+                    payload["embeds"] = [embed]
+
+                if not channel_id or not payload:
+                    error = "Channel and message content or embed are required."
+                else:
+                    r = _discord_api("POST", f"/channels/{channel_id}/messages", json=payload)
+                    ok = r.ok
+                    error = None if ok else _discord_err(r)
+                    detail = f"channel #{channel_id}: {content[:80] or embed_title}"
+
+            elif form_type == "dm_user":
+                content = request.form.get("content", "").strip()
+                if not user_id or not content:
+                    error = "User ID and message are required."
+                else:
+                    dm = _discord_api("POST", "/users/@me/channels", json={"recipient_id": user_id})
+                    if not dm.ok:
+                        ok, error = False, _discord_err(dm)
+                    else:
+                        dm_channel_id = dm.json()["id"]
+                        r = _discord_api("POST", f"/channels/{dm_channel_id}/messages", json={"content": content})
+                        ok = r.ok
+                        error = None if ok else _discord_err(r)
+                    detail = content[:80]
+
+            elif form_type == "kick_member":
+                reason = request.form.get("reason", "").strip() or "No reason given"
+                if not user_id:
+                    error = "User ID is required."
+                else:
+                    r = _discord_api("DELETE", f"/guilds/{guild_id}/members/{user_id}", reason=reason)
+                    ok = r.ok
+                    error = None if ok else _discord_err(r)
+                    detail = reason
+
+            elif form_type == "ban_member":
+                reason = request.form.get("reason", "").strip() or "No reason given"
+                delete_days = request.form.get("delete_days", "0")
+                try:
+                    delete_seconds = max(0, min(7, int(delete_days))) * 86400
+                except ValueError:
+                    delete_seconds = 0
+                if not user_id:
+                    error = "User ID is required."
+                else:
+                    r = _discord_api(
+                        "PUT", f"/guilds/{guild_id}/bans/{user_id}",
+                        reason=reason, json={"delete_message_seconds": delete_seconds},
+                    )
+                    ok = r.ok
+                    error = None if ok else _discord_err(r)
+                    detail = reason
+
+            elif form_type == "unban_member":
+                if not user_id:
+                    error = "User ID is required."
+                else:
+                    r = _discord_api("DELETE", f"/guilds/{guild_id}/bans/{user_id}")
+                    ok = r.ok
+                    error = None if ok else _discord_err(r)
+
+            elif form_type == "timeout_member":
+                reason = request.form.get("reason", "").strip() or "No reason given"
+                minutes = request.form.get("minutes", "10")
+                try:
+                    minutes = max(1, min(40320, int(minutes)))  # Discord max is 28 days
+                except ValueError:
+                    minutes = 10
+                if not user_id:
+                    error = "User ID is required."
+                else:
+                    until = (datetime.utcnow() + timedelta(minutes=minutes)).isoformat() + "Z"
+                    r = _discord_api(
+                        "PATCH", f"/guilds/{guild_id}/members/{user_id}",
+                        reason=reason, json={"communication_disabled_until": until},
+                    )
+                    ok = r.ok
+                    error = None if ok else _discord_err(r)
+                    detail = f"{minutes}m — {reason}"
+
+            elif form_type == "remove_timeout":
+                if not user_id:
+                    error = "User ID is required."
+                else:
+                    r = _discord_api(
+                        "PATCH", f"/guilds/{guild_id}/members/{user_id}",
+                        json={"communication_disabled_until": None},
+                    )
+                    ok = r.ok
+                    error = None if ok else _discord_err(r)
+
+            elif form_type in ("add_role", "remove_role"):
+                role_id = request.form.get("role_id")
+                if not user_id or not role_id:
+                    error = "User ID and role are required."
+                else:
+                    method = "PUT" if form_type == "add_role" else "DELETE"
+                    r = _discord_api(method, f"/guilds/{guild_id}/members/{user_id}/roles/{role_id}")
+                    ok = r.ok
+                    error = None if ok else _discord_err(r)
+                    detail = f"role {role_id}"
+
+            else:
+                error = "Unknown action."
+
+        except Exception as e:
+            logger.error(f"Console action '{form_type}' failed: {e}")
+            ok, error = False, str(e)[:300]
+
+        _log_console_action(guild_id, form_type, user_id, detail, ok, error)
+
+        status = "ok" if ok else "error"
+        msg = error or "Done."
+        return redirect(f"/dashboard/{guild_id}/console?status={status}&msg={msg}")
+
+    # ── GET: render the console ──────────────────────────────────────────
+    bot_headers = {"Authorization": f"Bot {BOT_TOKEN}", "User-Agent": "DashboardBot/1.0"}
+
+    roles_res = requests.get(f"https://discord.com/api/v10/guilds/{guild_id}/roles", headers=bot_headers)
+    roles = [r for r in (roles_res.json() if roles_res.ok else []) if r["name"] != "@everyone" and not r["managed"]]
+    roles.sort(key=lambda r: r["position"], reverse=True)
+
+    chans_res = requests.get(f"https://discord.com/api/v10/guilds/{guild_id}/channels", headers=bot_headers)
+    text_channels = [c for c in (chans_res.json() if chans_res.ok else []) if c["type"] == 0]
+
+    recent_actions = []
+    if db is not None:
+        recent_actions = list(
+            db["console_actions"].find({"guild_id": guild_id}).sort("timestamp", -1).limit(20)
+        )
+
+    guild_name = next((g["name"] for g in session.get("guilds", []) if int(g["id"]) == guild_id), "Server")
+
+    return render_template(
+        "console.html",
+        guild_id=guild_id,
+        guild_name=guild_name,
+        roles=roles,
+        channels=text_channels,
+        recent_actions=recent_actions,
+        status=request.args.get("status"),
+        status_msg=request.args.get("msg"),
+    )
+
+
+@app.route("/dashboard/<int:guild_id>/console/lookup")
+def console_lookup_user(guild_id):
+    """AJAX helper: search guild members by name so staff can grab a user ID."""
+    if "access_token" not in session:
+        return jsonify([]), 401
+
+    user_guild_ids = [int(g["id"]) for g in session.get("guilds", [])]
+    if guild_id not in user_guild_ids:
+        return jsonify([]), 403
+
+    query = request.args.get("query", "").strip()
+    if not query or not BOT_TOKEN:
+        return jsonify([])
+
+    bot_headers = {"Authorization": f"Bot {BOT_TOKEN}", "User-Agent": "DashboardBot/1.0"}
+    r = requests.get(
+        f"https://discord.com/api/v10/guilds/{guild_id}/members/search",
+        headers=bot_headers, params={"query": query, "limit": 8}, timeout=5,
+    )
+    if not r.ok:
+        return jsonify([])
+
+    results = []
+    for m in r.json():
+        user = m.get("user", {})
+        results.append({
+            "id": user.get("id"),
+            "username": user.get("username"),
+            "display_name": m.get("nick") or user.get("global_name") or user.get("username"),
+            "avatar": user.get("avatar"),
+        })
+    return jsonify(results)
+
+
+def _avatar_url(user):
+    uid = user.get("id")
+    ah = user.get("avatar")
+    if ah:
+        ext = "gif" if ah.startswith("a_") else "png"
+        return f"https://cdn.discordapp.com/avatars/{uid}/{ah}.{ext}"
+    try:
+        default_idx = (int(uid) >> 22) % 6
+    except (TypeError, ValueError):
+        default_idx = 0
+    return f"https://cdn.discordapp.com/embed/avatars/{default_idx}.png"
+
+
+def _serialize_message(m):
+    author = m.get("author", {})
+    ref = m.get("referenced_message")
+    return {
+        "id": m.get("id"),
+        "channel_id": m.get("channel_id"),
+        "content": m.get("content", ""),
+        "timestamp": m.get("timestamp"),
+        "edited_timestamp": m.get("edited_timestamp"),
+        "author": {
+            "id": author.get("id"),
+            "username": author.get("username", "Unknown"),
+            "bot": author.get("bot", False),
+            "avatar_url": _avatar_url(author),
+        },
+        "attachments": [
+            {"url": a.get("url"), "filename": a.get("filename")} for a in m.get("attachments", [])
+        ],
+        "embeds": [
+            {"title": e.get("title"), "description": e.get("description")} for e in m.get("embeds", [])
+        ],
+        "reply_to": (
+            {
+                "id": ref.get("id"),
+                "author": (ref.get("author") or {}).get("username", "Unknown"),
+                "content": (ref.get("content") or "")[:120],
+            }
+            if ref else None
+        ),
+        "is_bot_self": author.get("id") == _bot_user_id(),
+    }
+
+
+_bot_user_id_cache = {"id": None}
+
+
+def _bot_user_id():
+    if _bot_user_id_cache["id"] is None and BOT_TOKEN:
+        try:
+            r = _discord_api("GET", "/users/@me")
+            if r.ok:
+                _bot_user_id_cache["id"] = r.json().get("id")
+        except Exception:
+            pass
+    return _bot_user_id_cache["id"]
+
+
+@app.route("/dashboard/<int:guild_id>/console/chat")
+def bot_chat(guild_id):
+    """Live chat view: read a channel's recent messages and reply/send/forward as the bot."""
+    if "access_token" not in session:
+        return redirect("/")
+
+    user_guild_ids = [int(g["id"]) for g in session.get("guilds", [])]
+    if guild_id not in user_guild_ids:
+        abort(403)
+
+    if not bot_in_guild(guild_id):
+        return redirect(f"/dashboard?bot_missing={guild_id}")
+
+    if not BOT_TOKEN:
+        return "<h1>Error: DISCORD_BOT_TOKEN or DISCORD_TOKEN is missing from environment variables!</h1>", 500
+
+    bot_headers = {"Authorization": f"Bot {BOT_TOKEN}", "User-Agent": "DashboardBot/1.0"}
+    chans_res = requests.get(f"https://discord.com/api/v10/guilds/{guild_id}/channels", headers=bot_headers)
+    text_channels = [c for c in (chans_res.json() if chans_res.ok else []) if c["type"] == 0]
+    text_channels.sort(key=lambda c: c.get("position", 0))
+
+    guild_name = next((g["name"] for g in session.get("guilds", []) if int(g["id"]) == guild_id), "Server")
+
+    return render_template(
+        "chat.html",
+        guild_id=guild_id,
+        guild_name=guild_name,
+        channels=text_channels,
+    )
+
+
+@app.route("/dashboard/<int:guild_id>/console/chat/messages")
+def chat_fetch_messages(guild_id):
+    """AJAX: fetch a channel's messages. Pass ?after=<id> to poll for new ones only."""
+    access_error = _require_guild_access_json(guild_id)
+    if access_error:
+        return access_error
+
+    channel_id = request.args.get("channel_id")
+    if not channel_id:
+        return jsonify({"error": "channel_id required"}), 400
+
+    params = {"limit": 50}
+    after = request.args.get("after")
+    before = request.args.get("before")
+    if after:
+        params["after"] = after
+    if before:
+        params["before"] = before
+
+    r = _discord_api("GET", f"/channels/{channel_id}/messages", params=params)
+    if not r.ok:
+        try:
+            body = r.json()
+        except Exception:
+            body = {}
+        discord_msg = body.get("message", r.text[:200])
+        discord_code = body.get("code")
+        logger.warning(
+            f"Chat fetch failed for channel {channel_id} in guild {guild_id}: "
+            f"{r.status_code} {discord_msg} (code {discord_code})"
+        )
+        if r.status_code == 403:
+            friendly = "The bot can't view this channel — check its role has View Channel / Read Message History here."
+        elif r.status_code == 404:
+            friendly = "Channel not found — it may have been deleted."
+        else:
+            friendly = discord_msg
+        return jsonify({"error": friendly, "discord_code": discord_code}), r.status_code
+
+    messages = [_serialize_message(m) for m in r.json()]
+    messages.sort(key=lambda m: m["id"])  # ascending, oldest first
+    return jsonify({"messages": messages})
+
+
+@app.route("/dashboard/<int:guild_id>/console/chat/send", methods=["POST"])
+def chat_send_message(guild_id):
+    access_error = _require_guild_access_json(guild_id)
+    if access_error:
+        return access_error
+
+    data = request.get_json(silent=True) or {}
+    channel_id = data.get("channel_id")
+    content = (data.get("content") or "").strip()
+    reply_to = data.get("reply_to")
+
+    if not channel_id or not content:
+        return jsonify({"ok": False, "error": "channel_id and content are required"}), 400
+    if len(content) > 2000:
+        content = content[:2000]
+
+    payload = {"content": content}
+    if reply_to:
+        payload["message_reference"] = {"message_id": reply_to}
+
+    r = _discord_api("POST", f"/channels/{channel_id}/messages", json=payload)
+    ok = r.ok
+    _log_console_action(
+        guild_id, "chat_reply" if reply_to else "chat_send", channel_id,
+        content[:80], ok, None if ok else _discord_err(r),
+    )
+    if not ok:
+        return jsonify({"ok": False, "error": _discord_err(r)}), r.status_code
+    return jsonify({"ok": True, "message": _serialize_message(r.json())})
+
+
+@app.route("/dashboard/<int:guild_id>/console/chat/forward", methods=["POST"])
+def chat_forward_message(guild_id):
+    """Copies a message's content (and attachment links) into another channel,
+    clearly labelled as forwarded. (Uses a labelled copy rather than Discord's
+    native forward snapshot, so it works reliably across API versions.)"""
+    if "access_token" not in session:
+        return jsonify({"ok": False, "error": "unauthorized"}), 401
+    access_error = _require_guild_access_json(guild_id)
+    if access_error:
+        return access_error
+
+    data = request.get_json(silent=True) or {}
+    source_channel_id = data.get("source_channel_id")
+    dest_channel_id = data.get("dest_channel_id")
+    author_name = data.get("author_name", "Unknown")
+    content = (data.get("content") or "").strip()
+    attachments = data.get("attachment_urls") or []
+
+    if not source_channel_id or not dest_channel_id:
+        return jsonify({"ok": False, "error": "source and destination channels are required"}), 400
+
+    quoted = "\n".join(f"> {line}" for line in (content or "*[no text]*").splitlines()) or "> *[no text]*"
+    body = f"↪️ **Forwarded from <#{source_channel_id}>**, originally by **{author_name}**:\n{quoted}"
+    if attachments:
+        body += "\n" + "\n".join(attachments)
+    body = body[:2000]
+
+    r = _discord_api("POST", f"/channels/{dest_channel_id}/messages", json={"content": body})
+    ok = r.ok
+    _log_console_action(
+        guild_id, "chat_forward", dest_channel_id,
+        f"from #{source_channel_id}", ok, None if ok else _discord_err(r),
+    )
+    if not ok:
+        return jsonify({"ok": False, "error": _discord_err(r)}), r.status_code
+    return jsonify({"ok": True, "message": _serialize_message(r.json())})
+
+
+@app.route("/dashboard/<int:guild_id>/console/chat/delete", methods=["POST"])
+def chat_delete_message(guild_id):
+    access_error = _require_guild_access_json(guild_id)
+    if access_error:
+        return access_error
+
+    data = request.get_json(silent=True) or {}
+    channel_id = data.get("channel_id")
+    message_id = data.get("message_id")
+    if not channel_id or not message_id:
+        return jsonify({"ok": False, "error": "channel_id and message_id are required"}), 400
+
+    r = _discord_api("DELETE", f"/channels/{channel_id}/messages/{message_id}")
+    ok = r.ok
+    _log_console_action(guild_id, "chat_delete", channel_id, message_id, ok, None if ok else _discord_err(r))
+    if not ok:
+        return jsonify({"ok": False, "error": _discord_err(r)}), r.status_code
+    return jsonify({"ok": True})
+
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", 5000)), debug=True)

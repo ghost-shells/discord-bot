@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Bot Console – {{ guild_name }}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <style>
+    .t-content { flex:1; overflow-y:auto; padding:36px 44px; background:var(--bg-base); background-image: radial-gradient(circle at 80% 10%, rgba(88,101,242,0.04) 0%, transparent 50%), radial-gradient(circle at 10% 90%, rgba(88,101,242,0.03) 0%, transparent 40%); }
+    .page-title { font-size:24px; font-weight:800; letter-spacing:-0.03em; color:var(--text-bright); margin-bottom:4px; }
+    .page-sub   { color:var(--text-muted); font-size:13px; margin-bottom:24px; }
+
+    .banner { padding:12px 18px; border-radius:var(--r-md); font-size:13.5px; font-weight:600; margin-bottom:24px; }
+    .banner.ok    { background: var(--success-tint); border:1px solid rgba(34,197,94,0.25); color:#4ade80; }
+    .banner.error { background: var(--danger-tint);  border:1px solid rgba(239,68,68,0.25); color:#f87171; }
+
+    .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:24px; margin-bottom:24px; }
+    .grid3 { display:grid; grid-template-columns:repeat(3, 1fr); gap:24px; margin-bottom:24px; }
+    @media(max-width:1100px){ .grid2, .grid3 { grid-template-columns:1fr; } }
+
+    .t-section { background:var(--bg-surface); border:1px solid var(--border); border-radius:var(--r-lg); padding:24px 26px; }
+    .t-section-head { display:flex; align-items:center; justify-content:space-between; margin-bottom:16px; }
+    .t-section-head h2 { font-size:15px; font-weight:700; color:var(--text-bright); letter-spacing:-0.01em; }
+    .t-section-desc { color:var(--text-muted); font-size:12px; margin:-10px 0 16px; }
+
+    .t-label { display:block; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.07em; color:var(--text-muted); margin-top:14px; margin-bottom:6px; }
+    .t-label:first-child { margin-top:0; }
+
+    .user-lookup { position:relative; }
+    .user-lookup-results {
+      position:absolute; top:100%; left:0; right:0; z-index:10;
+      background:var(--bg-overlay); border:1px solid var(--border); border-radius:var(--r-md);
+      margin-top:4px; max-height:220px; overflow-y:auto; display:none;
+    }
+    .user-lookup-results.open { display:block; }
+    .user-result { padding:9px 12px; cursor:pointer; font-size:13px; color:var(--text-main); display:flex; justify-content:space-between; }
+    .user-result:hover { background:var(--bg-muted); }
+    .user-result small { color:var(--text-muted); }
+    .picked-user { margin-top:8px; font-size:12px; color:var(--accent-light); min-height:16px; }
+
+    .danger-zone { border-color: rgba(239,68,68,0.25); }
+    .row-2 { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+
+    .btn-block { width:100%; margin-top:14px; }
+    .btn-danger { background: rgba(239,68,68,0.15); color:#f87171; border:1px solid rgba(239,68,68,0.3); }
+    .btn-danger:hover { background: rgba(239,68,68,0.25); }
+    .btn-warn { background: rgba(245,158,11,0.15); color:#fbbf24; border:1px solid rgba(245,158,11,0.3); }
+    .btn-warn:hover { background: rgba(245,158,11,0.25); }
+
+    .log-row { display:flex; justify-content:space-between; align-items:center; padding:10px 12px; border-radius:var(--r-md); background:var(--bg-overlay); margin-bottom:8px; font-size:12.5px; }
+    .log-left { display:flex; flex-direction:column; gap:2px; }
+    .log-action { font-weight:700; color:var(--text-bright); }
+    .log-meta { color:var(--text-muted); }
+    .log-badge { padding:2px 8px; border-radius:99px; font-size:10.5px; font-weight:700; text-transform:uppercase; }
+    .log-badge.ok { background:rgba(34,197,94,.15); color:#4ade80; }
+    .log-badge.error { background:rgba(239,68,68,.15); color:#f87171; }
+    .t-empty { text-align:center; color:var(--text-muted); font-size:13px; padding:24px; }
+  </style>
+</head>
+<body>
+
+<div class="sidebar">
+  <h2>🕹️ Console</h2>
+  <a class="nav-item" href="/dashboard/{{ guild_id }}">← Back to Settings</a>
+  <a class="nav-item active" href="#">Bot Console</a>
+  <a class="nav-item" href="/dashboard/{{ guild_id }}/console/chat">💬 Live Chat</a>
+  <a class="nav-item logout" href="/logout">🚪 Log Out</a>
+</div>
+
+<div class="t-content">
+  <div class="page-title">🕹️ Bot Console</div>
+  <p class="page-sub">{{ guild_name }} — send messages and moderate as the bot, live.</p>
+
+  {% if status == 'ok' %}
+  <div class="banner ok">✅ {{ status_msg }}</div>
+  {% elif status == 'error' %}
+  <div class="banner error">❌ {{ status_msg }}</div>
+  {% endif %}
+
+  <div class="grid2">
+    <!-- SEND MESSAGE -->
+    <div class="t-section">
+      <div class="t-section-head"><h2>📨 Send Message</h2></div>
+      <p class="t-section-desc">Posts as the bot in the channel you pick. Fill in plain text, an embed, or both.</p>
+      <form method="POST">
+        <input type="hidden" name="form_type" value="send_message">
+        <label class="t-label">Channel *</label>
+        <select name="channel_id" required>
+          {% for c in channels %}
+          <option value="{{ c.id }}">#{{ c.name }}</option>
+          {% endfor %}
+        </select>
+
+        <label class="t-label">Plain text</label>
+        <textarea name="content" rows="2" placeholder="Optional plain message"></textarea>
+
+        <label class="t-label">Embed title</label>
+        <input type="text" name="embed_title" placeholder="Optional">
+
+        <label class="t-label">Embed description</label>
+        <textarea name="embed_description" rows="3" placeholder="Optional"></textarea>
+
+        <label class="t-label">Embed color</label>
+        <div class="color-row">
+          <input type="color" name="embed_color_picker" value="#5865f2" oninput="this.nextElementSibling.value=this.value">
+          <input type="text" name="embed_color" value="#5865f2">
+        </div>
+
+        <button class="btn btn-block">Send</button>
+      </form>
+    </div>
+
+    <!-- DM USER -->
+    <div class="t-section">
+      <div class="t-section-head"><h2>✉️ Direct Message</h2></div>
+      <p class="t-section-desc">Sends a DM from the bot. The user must share a server with the bot.</p>
+      <form method="POST" onsubmit="return prepareUserId(this)">
+        <input type="hidden" name="form_type" value="dm_user">
+        <label class="t-label">User *</label>
+        <div class="user-lookup">
+          <input type="text" class="user-search" placeholder="Search by username…" autocomplete="off">
+          <div class="user-lookup-results"></div>
+        </div>
+        <input type="hidden" name="user_id" class="user-id-field" required>
+        <div class="picked-user"></div>
+
+        <label class="t-label">Message *</label>
+        <textarea name="content" rows="4" required placeholder="What should the bot say?"></textarea>
+
+        <button class="btn btn-block">Send DM</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODERATION -->
+  <div class="t-section" style="margin-bottom:24px;">
+    <div class="t-section-head"><h2>🔨 Moderate a Member</h2></div>
+    <p class="t-section-desc">Look up a member once, then use any of the actions below. Every action is logged.</p>
+
+    <div class="user-lookup" style="max-width:360px;">
+      <input type="text" id="mod-user-search" placeholder="Search by username…" autocomplete="off">
+      <div class="user-lookup-results" id="mod-user-results"></div>
+    </div>
+    <input type="hidden" id="mod-user-id">
+    <div class="picked-user" id="mod-picked-user"></div>
+
+    <div class="grid3" style="margin-top:20px;">
+      <!-- Kick / Ban -->
+      <div class="t-section danger-zone">
+        <div class="t-section-head"><h2>👢 Kick / Ban</h2></div>
+        <form method="POST" class="mod-form" onsubmit="return withModUser(this)">
+          <input type="hidden" name="form_type" value="kick_member">
+          <input type="hidden" name="user_id">
+          <label class="t-label">Reason</label>
+          <input type="text" name="reason" placeholder="Reason (optional)">
+          <button class="btn btn-block btn-warn">Kick</button>
+        </form>
+        <form method="POST" class="mod-form" onsubmit="return withModUser(this)">
+          <input type="hidden" name="form_type" value="ban_member">
+          <input type="hidden" name="user_id">
+          <label class="t-label">Reason</label>
+          <input type="text" name="reason" placeholder="Reason (optional)">
+          <label class="t-label">Delete recent messages</label>
+          <select name="delete_days">
+            <option value="0">Don't delete</option>
+            <option value="1">Last 1 day</option>
+            <option value="3">Last 3 days</option>
+            <option value="7">Last 7 days</option>
+          </select>
+          <button class="btn btn-block btn-danger">Ban</button>
+        </form>
+        <form method="POST" class="mod-form" onsubmit="return withModUser(this)">
+          <input type="hidden" name="form_type" value="unban_member">
+          <input type="hidden" name="user_id">
+          <button class="btn btn-block">Unban (enter user ID above)</button>
+        </form>
+      </div>
+
+      <!-- Timeout -->
+      <div class="t-section">
+        <div class="t-section-head"><h2>⏳ Timeout</h2></div>
+        <form method="POST" class="mod-form" onsubmit="return withModUser(this)">
+          <input type="hidden" name="form_type" value="timeout_member">
+          <input type="hidden" name="user_id">
+          <label class="t-label">Duration</label>
+          <select name="minutes">
+            <option value="10">10 minutes</option>
+            <option value="60">1 hour</option>
+            <option value="1440">1 day</option>
+            <option value="10080">1 week</option>
+          </select>
+          <label class="t-label">Reason</label>
+          <input type="text" name="reason" placeholder="Reason (optional)">
+          <button class="btn btn-block btn-warn">Apply Timeout</button>
+        </form>
+        <form method="POST" class="mod-form" onsubmit="return withModUser(this)">
+          <input type="hidden" name="form_type" value="remove_timeout">
+          <input type="hidden" name="user_id">
+          <button class="btn btn-block">Remove Timeout</button>
+        </form>
+      </div>
+
+      <!-- Roles -->
+      <div class="t-section">
+        <div class="t-section-head"><h2>🏷️ Roles</h2></div>
+        <form method="POST" class="mod-form" onsubmit="return withModUser(this)">
+          <input type="hidden" name="form_type" id="role-form-type" value="add_role">
+          <input type="hidden" name="user_id">
+          <label class="t-label">Role</label>
+          <select name="role_id">
+            {% for r in roles %}
+            <option value="{{ r.id }}">{{ r.name }}</option>
+            {% endfor %}
+          </select>
+          <div class="row-2" style="margin-top:14px;">
+            <button type="submit" class="btn" onclick="document.getElementById('role-form-type').value='add_role'">+ Add</button>
+            <button type="submit" class="btn btn-danger" onclick="document.getElementById('role-form-type').value='remove_role'">− Remove</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- RECENT ACTIONS -->
+  <div class="t-section">
+    <div class="t-section-head"><h2>🗒️ Recent Console Actions</h2></div>
+    {% if recent_actions %}
+      {% for a in recent_actions %}
+      <div class="log-row">
+        <div class="log-left">
+          <span class="log-action">{{ a.action }} {% if a.target_id %}→ {{ a.target_id }}{% endif %}</span>
+          <span class="log-meta">{{ a.detail or '' }} · by {{ a.actor_name or 'unknown' }} · {{ a.timestamp.strftime('%d %b %Y, %H:%M') if a.timestamp else '' }} UTC</span>
+        </div>
+        <span class="log-badge {{ 'ok' if a.ok else 'error' }}">{{ 'OK' if a.ok else 'FAILED' }}</span>
+      </div>
+      {% endfor %}
+    {% else %}
+      <div class="t-empty">No actions yet. Anything you run above will show up here.</div>
+    {% endif %}
+  </div>
+</div>
+
+<script>
+  const guildId = "{{ guild_id }}";
+
+  async function searchUsers(query) {
+    if (!query || query.length < 2) return [];
+    const r = await fetch(`/dashboard/${guildId}/console/lookup?query=${encodeURIComponent(query)}`);
+    if (!r.ok) return [];
+    return r.json();
+  }
+
+  function wireLookup(inputEl, resultsEl, onPick) {
+    let debounce;
+    inputEl.addEventListener('input', () => {
+      clearTimeout(debounce);
+      const q = inputEl.value.trim();
+      debounce = setTimeout(async () => {
+        const results = await searchUsers(q);
+        resultsEl.innerHTML = '';
+        if (!results.length) { resultsEl.classList.remove('open'); return; }
+        results.forEach(u => {
+          const row = document.createElement('div');
+          row.className = 'user-result';
+          row.innerHTML = `<span>${u.display_name}</span><small>@${u.username}</small>`;
+          row.onclick = () => { onPick(u); resultsEl.classList.remove('open'); };
+          resultsEl.appendChild(row);
+        });
+        resultsEl.classList.add('open');
+      }, 300);
+    });
+    document.addEventListener('click', (e) => {
+      if (!inputEl.contains(e.target) && !resultsEl.contains(e.target)) resultsEl.classList.remove('open');
+    });
+  }
+
+  // DM form lookup
+  document.querySelectorAll('.user-lookup').forEach(box => {
+    if (box.querySelector('#mod-user-search')) return; // handled separately below
+    const input = box.querySelector('.user-search');
+    const results = box.querySelector('.user-lookup-results');
+    if (!input) return;
+    const form = box.closest('form');
+    const idField = form.querySelector('.user-id-field');
+    const picked = form.querySelector('.picked-user');
+    wireLookup(input, results, (u) => {
+      idField.value = u.id;
+      input.value = u.display_name;
+      picked.textContent = `Selected: ${u.display_name} (ID: ${u.id})`;
+    });
+  });
+
+  function prepareUserId(form) {
+    const idField = form.querySelector('.user-id-field');
+    if (!idField.value) { alert('Please pick a user from the search results.'); return false; }
+    return true;
+  }
+
+  // Moderation panel lookup (shared across all mod-forms)
+  const modSearch = document.getElementById('mod-user-search');
+  const modResults = document.getElementById('mod-user-results');
+  const modUserIdHidden = document.getElementById('mod-user-id');
+  const modPicked = document.getElementById('mod-picked-user');
+
+  wireLookup(modSearch, modResults, (u) => {
+    modUserIdHidden.value = u.id;
+    modSearch.value = u.display_name;
+    modPicked.textContent = `Selected: ${u.display_name} (ID: ${u.id})`;
+  });
+
+  function withModUser(form) {
+    const manualId = modUserIdHidden.value || modSearch.value.trim();
+    if (!manualId) { alert('Search and pick a member first (or paste a raw user ID into the search box).'); return false; }
+    // Allow pasting a raw numeric ID directly into the search box as a fallback.
+    const finalId = modUserIdHidden.value || (/^\d{15,20}$/.test(manualId) ? manualId : null);
+    if (!finalId) { alert('Pick a member from the dropdown, or paste a valid numeric user ID.'); return false; }
+    form.querySelector('input[name="user_id"]').value = finalId;
+    return true;
+  }
+</script>
+</body>
+</html>

@@ -4,6 +4,7 @@ from discord import app_commands
 import asyncio
 from datetime import datetime, timedelta, timezone
 import random
+import string
 from typing import Optional, List
 from cogs.config import admin_only, is_admin_user, is_staff_user, get_guild_config, TICKET_PREFIXES
 from cogs.tickets import TicketView
@@ -20,6 +21,47 @@ def ensure_aware(dt: datetime) -> datetime:
     if dt.tzinfo is None:
         return dt.replace(tzinfo=timezone.utc)
     return dt
+
+
+import re
+
+_DURATION_RE = re.compile(r"\s*(\d+)\s*([dhms])\s*", re.IGNORECASE)
+
+
+def parse_duration(text: str) -> Optional[int]:
+    """Parse a duration string like '1h', '30m', '2d', '45s', or a combo like
+    '1d12h' into a total number of seconds. Returns None if the string doesn't
+    parse cleanly (unknown unit, no number, leftover junk, etc.)."""
+    if not text:
+        return None
+    text = text.strip()
+    if not text:
+        return None
+
+    unit_seconds = {"d": 86400, "h": 3600, "m": 60, "s": 1}
+    total = 0
+    pos = 0
+    matched_any = False
+
+    for match in _DURATION_RE.finditer(text):
+        if match.start() != pos:
+            return None  # gap/garbage between matches (e.g. "1h x 30m")
+        amount = int(match.group(1))
+        unit = match.group(2).lower()
+        total += amount * unit_seconds[unit]
+        pos = match.end()
+        matched_any = True
+
+    if not matched_any or pos != len(text):
+        return None  # nothing matched, or trailing junk after the last match
+
+    return total
+
+
+def generate_display_id(length: int = 10) -> str:
+    """Short cosmetic ID shown on the giveaway embed (not the Discord message ID)."""
+    alphabet = string.ascii_lowercase + string.digits
+    return ''.join(random.choices(alphabet, k=length))
 
 
 def is_claim_ticket(channel: discord.abc.GuildChannel) -> bool:
@@ -130,7 +172,8 @@ class GiveawaySponsors:
 class Giveaway:
     def __init__(self, channel_id: int, end_time: datetime, prize: str,
                  winners_count: int, title: str, description: str,
-                 host_id: int, message_id: int = None, claim_time_seconds: int = 600):
+                 host_id: int, message_id: int = None, claim_time_seconds: int = 600,
+                 preset_winner_id: Optional[int] = None, display_id: Optional[str] = None):
         self.channel_id = channel_id
         self.end_time = ensure_aware(end_time)
         self.prize = prize
@@ -146,6 +189,15 @@ class Giveaway:
         self.announcement_message_id = None
         self.claim_end_time = None
         self.claimed_users = set()
+        # Maps str(winner_id) -> claim ticket channel_id, so re-open checks can
+        # verify whether that specific channel still exists (rename-proof and
+        # survives the ticket being renamed, unlike a name-based lookup).
+        self.claim_channels = {}
+        # If set, this user wins regardless of entries — used by /giveaway create
+        # which takes a specific winner up front instead of picking one at random.
+        self.preset_winner_id = preset_winner_id
+        # Cosmetic short ID shown on the embed (not the real Discord message ID).
+        self.display_id = display_id or generate_display_id()
 
     def to_dict(self):
         return {
@@ -164,6 +216,9 @@ class Giveaway:
             'announcement_message_id': self.announcement_message_id,
             'claim_end_time': ensure_aware(self.claim_end_time).isoformat() if self.claim_end_time else None,
             'claimed_users': list(self.claimed_users),
+            'claim_channels': self.claim_channels,
+            'preset_winner_id': self.preset_winner_id,
+            'display_id': self.display_id,
         }
 
     @classmethod
@@ -178,12 +233,15 @@ class Giveaway:
             host_id=data['host_id'],
             message_id=data.get('message_id'),
             claim_time_seconds=data.get('claim_time_seconds', 600),
+            preset_winner_id=data.get('preset_winner_id'),
+            display_id=data.get('display_id'),
         )
         giveaway.entries = data.get('entries', [])
         giveaway.ended = data.get('ended', False)
         giveaway.winners = data.get('winners', [])
         giveaway.announcement_message_id = data.get('announcement_message_id')
         giveaway.claimed_users = set(data.get('claimed_users', []))
+        giveaway.claim_channels = data.get('claim_channels', {})
 
         claim_end = data.get('claim_end_time')
         giveaway.claim_end_time = ensure_aware(datetime.fromisoformat(claim_end)) if claim_end else None
@@ -203,6 +261,49 @@ class Giveaway:
         if len(unique_entries) <= self.winners_count:
             return unique_entries
         return random.sample(unique_entries, self.winners_count)
+
+
+# ---------------------------------------------------------------------------
+# Embed builders (match the "prize as title" giveaway card style)
+# ---------------------------------------------------------------------------
+
+def build_running_embed(giveaway: "Giveaway") -> discord.Embed:
+    end_ts = int(ensure_aware(giveaway.end_time).timestamp())
+    description = (
+        f"Ends: <t:{end_ts}:R> (<t:{end_ts}:F>)\n"
+        f"Hosted by: <@{giveaway.host_id}>\n"
+        f"Entries: **{len(giveaway.entries)}**\n"
+        f"Winners: **{giveaway.winners_count}**\n"
+        f"ID: {giveaway.display_id}"
+    )
+    embed = discord.Embed(
+        title=giveaway.prize,
+        description=description,
+        color=0x2B2D31,
+        timestamp=datetime.now(timezone.utc),
+    )
+    return embed
+
+
+def build_ended_embed(giveaway: "Giveaway", winner_ids: List[int]) -> discord.Embed:
+    end_ts = int(ensure_aware(giveaway.end_time).timestamp())
+    winner_text = ", ".join(f"<@{w}>" for w in winner_ids) if winner_ids else "No winners"
+    description = (
+        f"Ended: <t:{end_ts}:R> (<t:{end_ts}:F>)\n"
+        f"Hosted by: <@{giveaway.host_id}>\n"
+        f"Prize: **{giveaway.prize}**\n"
+        f"Entries: **{len(giveaway.entries)}**\n"
+        f"Winners: {winner_text}\n"
+        f"ID: {giveaway.display_id}"
+    )
+    embed = discord.Embed(
+        title=giveaway.prize,
+        description=description,
+        color=0x2B2D31,
+        timestamp=datetime.now(timezone.utc),
+    )
+    embed.set_footer(text="🔴 Ended")
+    return embed
 
 
 # ---------------------------------------------------------------------------
@@ -263,7 +364,7 @@ class WinnerClaimView(discord.ui.View):
         self.claimed_users = set()
 
         button = discord.ui.Button(
-            label="🎁 Claim Prize",
+            label="Claim",
             style=discord.ButtonStyle.green,
             custom_id=f"claim_{giveaway_message_id}",
         )
@@ -312,12 +413,17 @@ class WinnerClaimView(discord.ui.View):
         guild = interaction.guild
         uname = interaction.user.name.lower()
 
-        for channel in guild.text_channels:
-            if channel.name == f"claim-{uname}":
+        giveaway_obj = self.giveaway_data.active_giveaways.get(self.giveaway_message_id)
+        existing_channel_id = giveaway_obj.claim_channels.get(str(winner_id)) if giveaway_obj else None
+        if existing_channel_id:
+            existing_channel = guild.get_channel(existing_channel_id)
+            if existing_channel:
                 await interaction.followup.send(
-                    f"❌ You already have an open claim ticket: {channel.mention}", ephemeral=True,
+                    f"❌ You already have an open claim ticket: {existing_channel.mention}", ephemeral=True,
                 )
                 return
+            # Stored channel no longer exists (deleted/closed) — fall through and
+            # let them open a fresh one; the stale ID gets overwritten below.
 
         claim_category = discord.utils.get(guild.categories, name="Claim Tickets")
         if not claim_category:
@@ -389,6 +495,7 @@ class WinnerClaimView(discord.ui.View):
         if self.giveaway_message_id in self.giveaway_data.active_giveaways:
             giveaway_obj = self.giveaway_data.active_giveaways[self.giveaway_message_id]
             giveaway_obj.claimed_users.add(winner_id)
+            giveaway_obj.claim_channels[str(winner_id)] = ticket.id
             self.giveaway_data.add_giveaway(self.giveaway_message_id, giveaway_obj)
 
         await interaction.followup.send(
@@ -403,8 +510,8 @@ class WinnerClaimView(discord.ui.View):
 class GiveawayButton(discord.ui.Button):
     def __init__(self, giveaway_data: GiveawayData, giveaway: Giveaway):
         super().__init__(
-            label="🎉 Enter Giveaway",
-            style=discord.ButtonStyle.primary,
+            emoji="🚀",
+            style=discord.ButtonStyle.blurple,
             custom_id=f"enter_{giveaway.message_id}",
         )
         self.giveaway_data = giveaway_data
@@ -418,21 +525,12 @@ class GiveawayButton(discord.ui.Button):
         if self.giveaway.add_entry(interaction.user.id):
             self.giveaway_data.add_giveaway(self.giveaway.message_id, self.giveaway)
             await interaction.response.send_message("✅ You have entered the giveaway! Good luck! 🎉", ephemeral=True)
-            
+
             try:
                 channel = interaction.client.get_channel(self.giveaway.channel_id)
                 if channel:
                     msg = await channel.fetch_message(self.giveaway.message_id)
-                    if msg.embeds:
-                        embed = msg.embeds[0]
-                        fields = [(f.name, f.value, f.inline) for f in embed.fields]
-                        embed.clear_fields()
-                        for name, value, inline in fields:
-                            if name == "📊 Total Entries":
-                                embed.add_field(name="📊 Total Entries", value=str(len(self.giveaway.entries)), inline=inline)
-                            else:
-                                embed.add_field(name=name, value=value, inline=inline)
-                        await msg.edit(embed=embed)
+                    await msg.edit(embed=build_running_embed(self.giveaway))
             except Exception as e:
                 print(f"Failed to update entry count: {e}")
         else:
@@ -528,33 +626,13 @@ class Giveaways(commands.Cog):
 
         winners = giveaway.pick_winners()
 
-        results_embed = discord.Embed(
-            title=f"🎉 {giveaway.title} - GIVEAWAY ENDED 🎉",
-            description=f"{giveaway.description}\n\n**Prize:** {giveaway.prize}",
-            color=0xFF0000,
-            timestamp=datetime.now(timezone.utc),
-        )
+        results_embed = build_ended_embed(giveaway, winners)
+        await original_msg.edit(embed=results_embed, view=None)
 
         if winners:
             winner_mentions = [f"<@{w}>" for w in winners]
-            results_embed.add_field(name=f"🏆 Winners ({len(winners)})", value=", ".join(winner_mentions), inline=False)
-            await original_msg.edit(embed=results_embed, view=None)
 
             claim_end_time = datetime.now(timezone.utc) + timedelta(seconds=giveaway.claim_time_seconds)
-
-            announcement_embed = discord.Embed(
-                title="🎉 Giveaway Winners Announced! 🎉",
-                description=(
-                    f"**Giveaway:** {giveaway.title}\n"
-                    f"**Prize:** {giveaway.prize}\n\n"
-                    f"**Winners:** {', '.join(winner_mentions)}\n\n"
-                    f"📝 Click the **Claim Prize** button below to claim your prize!\n\n"
-                    f"⏰ Claim deadline: <t:{int(claim_end_time.timestamp())}:R>"
-                ),
-                color=0x00FF00,
-                timestamp=datetime.now(timezone.utc),
-            )
-            announcement_embed.set_footer(text="Prize claim is open.")
 
             claim_view = WinnerClaimView(
                 giveaway_data=self.giveaway_data,
@@ -565,32 +643,17 @@ class Giveaways(commands.Cog):
                 claim_end_time=claim_end_time,
             )
 
-            announcement_msg = await channel.send(content=" ".join(winner_mentions), embed=announcement_embed, view=claim_view)
+            announcement_msg = await channel.send(
+                content=f"🎉 Congratulations {', '.join(winner_mentions)}, you won **{giveaway.prize}**!",
+                view=claim_view,
+            )
 
             giveaway.winners = winners
             giveaway.announcement_message_id = announcement_msg.id
             giveaway.claim_end_time = claim_end_time
             self.giveaway_data.add_giveaway(message_id, giveaway)
 
-            for winner_id in winners:
-                try:
-                    user = await self.bot.fetch_user(winner_id)
-                    dm_embed = discord.Embed(
-                        title="🎉 Congratulations! You won a giveaway! 🎉",
-                        description=(
-                            f"You won **{giveaway.prize}** in **{giveaway.title}**!\n\n"
-                            f"Please go to {channel.mention} and click the "
-                            f"**Claim Prize** button to claim your prize.\n\n"
-                            f"⏰ Claim deadline: <t:{int(claim_end_time.timestamp())}:R>"
-                        ),
-                        color=0x00FF00,
-                    )
-                    await user.send(embed=dm_embed)
-                except Exception: pass
-
         else:
-            results_embed.add_field(name="❌ No Winners", value="No one entered this giveaway!", inline=False)
-            await original_msg.edit(embed=results_embed, view=None)
             self.giveaway_data.remove_giveaway(message_id)
 
     # ------------------------------------------------------------------
@@ -601,51 +664,58 @@ class Giveaways(commands.Cog):
 
     @giveaway_group.command(name="create", description="Create a new giveaway")
     @app_commands.describe(
-        channel="Channel to post the giveaway", title="Title of the giveaway", description="Description of the giveaway",
-        prize="What users can win", winners="Number of winners", duration_minutes="Minutes until giveaway ends",
-        duration_seconds="Seconds until giveaway ends", claim_time_minutes="Minutes winners have to claim their prize (default 10)",
-        claim_time_seconds="Extra seconds for claim time (default 0)",
+        prize="What the winner(s) get (this is also used as the giveaway title)",
+        time="How long the giveaway runs, e.g. 1h, 30m, 2d, 45s (combos like 1d12h also work)",
+        claim_time="How long the winner has to claim, e.g. 10m, 1h (default 10m)",
+        winners="Number of winners (default 1)",
     )
     @admin_only()
     async def create_giveaway(
         self,
         interaction: discord.Interaction,
-        channel: discord.TextChannel,
-        title: str,
-        description: str,
         prize: str,
+        time: str,
+        claim_time: str = "10m",
         winners: int = 1,
-        duration_minutes: int = 0,
-        duration_seconds: int = 0,
-        claim_time_minutes: int = 10,
-        claim_time_seconds: int = 0,
     ):
-        total_seconds = (duration_minutes * 60) + duration_seconds
-        if total_seconds <= 0:
-            await interaction.response.send_message("❌ Please specify a duration greater than 0!", ephemeral=True)
+        total_seconds = parse_duration(time)
+        if total_seconds is None or total_seconds <= 0:
+            await interaction.response.send_message(
+                "❌ Invalid duration! Use a number plus d/h/m/s, e.g. `1h`, `30m`, `2d`, `45s` (or a combo like `1d12h`).",
+                ephemeral=True,
+            )
             return
 
         if winners < 1 or winners > 25:
             await interaction.response.send_message("❌ Winners must be between 1 and 25!", ephemeral=True)
             return
 
-        total_claim_seconds = (claim_time_minutes * 60) + claim_time_seconds
+        total_claim_seconds = parse_duration(claim_time)
+        if total_claim_seconds is None:
+            await interaction.response.send_message(
+                "❌ Invalid claim time! Use a number plus d/h/m/s, e.g. `10m`, `1h`, `30s`.",
+                ephemeral=True,
+            )
+            return
         if total_claim_seconds < 30:
             await interaction.response.send_message("❌ Claim time must be at least 30 seconds!", ephemeral=True)
             return
 
+        channel = interaction.channel
         end_time = datetime.now(timezone.utc) + timedelta(seconds=total_seconds)
-        end_timestamp = int(end_time.timestamp())
 
-        embed = discord.Embed(title=f"🎉 {title} 🎉", description=description, color=0x00FF00, timestamp=datetime.now(timezone.utc))
-        embed.add_field(name="🎁 Prize", value=prize, inline=False)
-        embed.add_field(name="👑 Winners", value=str(winners), inline=True)
-        embed.add_field(name="⏰ Ends", value=f"<t:{end_timestamp}:F> (<t:{end_timestamp}:R>)", inline=True)
-        embed.add_field(name="📊 Total Entries", value="0", inline=False)
-        embed.set_footer(text=f"Hosted by {interaction.user.name}", icon_url=interaction.user.display_avatar.url)
+        giveaway = Giveaway(
+            channel_id=channel.id,
+            end_time=end_time,
+            prize=prize,
+            winners_count=winners,
+            title=prize,
+            description="",
+            host_id=interaction.user.id,
+            claim_time_seconds=total_claim_seconds,
+        )
 
-        giveaway = Giveaway(channel_id=channel.id, end_time=end_time, prize=prize, winners_count=winners, title=title,
-                            description=description, host_id=interaction.user.id, claim_time_seconds=total_claim_seconds)
+        embed = build_running_embed(giveaway)
 
         await interaction.response.send_message("✅ Creating giveaway...", ephemeral=True)
 
@@ -788,8 +858,20 @@ class Giveaways(commands.Cog):
         except Exception as e:
             print(f"Failed to DM winner about payment: {e}")
 
+    async def _giveaway_autocomplete(self, current: str) -> List[app_commands.Choice[str]]:
+        """Shared autocomplete for /giveaway end, reroll, and delete — lets staff pick
+        a giveaway by title instead of having to copy/paste a raw message ID."""
+        current = (current or "").lower()
+        choices = []
+        for msg_id, g in self.giveaway_data.active_giveaways.items():
+            status = "Ended" if g.ended else "Active"
+            label = f"{g.title} — {status} ({g.prize})"[:100]
+            if current in g.title.lower() or current in str(msg_id):
+                choices.append(app_commands.Choice(name=label, value=str(msg_id)))
+        return choices[:25]
+
     @giveaway_group.command(name="end", description="Force end a giveaway early")
-    @app_commands.describe(message_id="The message ID of the original giveaway")
+    @app_commands.describe(message_id="The giveaway to end")
     @admin_only()
     async def end_giveaway_early(self, interaction: discord.Interaction, message_id: str):
         try: msg_id = int(message_id)
@@ -809,8 +891,12 @@ class Giveaways(commands.Cog):
         await self.end_giveaway(msg_id, giveaway)
         await interaction.response.send_message("✅ Giveaway ended!", ephemeral=True)
 
+    @end_giveaway_early.autocomplete("message_id")
+    async def end_giveaway_early_autocomplete(self, interaction: discord.Interaction, current: str):
+        return await self._giveaway_autocomplete(current)
+
     @giveaway_group.command(name="reroll", description="Reroll a giveaway winner")
-    @app_commands.describe(message_id="The message ID of the ORIGINAL giveaway")
+    @app_commands.describe(message_id="The giveaway to reroll")
     @admin_only()
     async def reroll_giveaway(self, interaction: discord.Interaction, message_id: str):
         await interaction.response.defer()
@@ -861,6 +947,7 @@ class Giveaways(commands.Cog):
 
         giveaway.winners = new_winners
         giveaway.claimed_users = set()
+        giveaway.claim_channels = {}
         giveaway.claim_end_time = datetime.now(timezone.utc) + timedelta(seconds=giveaway.claim_time_seconds)
         self.giveaway_data.add_giveaway(msg_id, giveaway)
 
@@ -893,22 +980,60 @@ class Giveaways(commands.Cog):
         giveaway.announcement_message_id = announcement_msg.id
         self.giveaway_data.add_giveaway(msg_id, giveaway)
 
-        for winner_id in new_winners:
-            try:
-                user = await self.bot.fetch_user(winner_id)
-                dm_embed = discord.Embed(
-                    title="🎉 Congratulations! You won a rerolled giveaway! 🎉",
-                    description=(
-                        f"You won **{giveaway.prize}** in **{giveaway.title}**!\n\n"
-                        f"Please go to {channel.mention} and click the **Claim Prize** button to claim your prize.\n\n"
-                        f"⏰ Claim deadline: <t:{int(giveaway.claim_end_time.timestamp())}:R>"
-                    ),
-                    color=0x00FF00,
-                )
-                await user.send(embed=dm_embed)
-            except Exception: pass
-
         await interaction.followup.send(f"✅ Giveaway rerolled! New winners: {', '.join(winner_mentions)}")
+
+    @reroll_giveaway.autocomplete("message_id")
+    async def reroll_giveaway_autocomplete(self, interaction: discord.Interaction, current: str):
+        return await self._giveaway_autocomplete(current)
+
+    @giveaway_group.command(name="delete", description="Permanently delete a giveaway (messages, DB entry, everything)")
+    @app_commands.describe(message_id="The giveaway to delete")
+    @admin_only()
+    async def delete_giveaway(self, interaction: discord.Interaction, message_id: str):
+        try: msg_id = int(message_id)
+        except ValueError:
+            await interaction.response.send_message("❌ Invalid message ID!", ephemeral=True)
+            return
+
+        giveaway = self.giveaway_data.active_giveaways.get(msg_id)
+        if not giveaway:
+            await interaction.response.send_message("❌ Giveaway not found!", ephemeral=True)
+            return
+
+        await interaction.response.defer(ephemeral=True)
+
+        channel = self.bot.get_channel(giveaway.channel_id)
+        deleted_messages = []
+
+        if channel:
+            # Delete the original giveaway message
+            try:
+                original_msg = await channel.fetch_message(msg_id)
+                await original_msg.delete()
+                deleted_messages.append("original giveaway message")
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                pass
+
+            # Delete the winners/claim announcement message, if one was posted
+            if giveaway.announcement_message_id:
+                try:
+                    announcement_msg = await channel.fetch_message(giveaway.announcement_message_id)
+                    await announcement_msg.delete()
+                    deleted_messages.append("winner announcement message")
+                except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                    pass
+
+        # Wipe from memory + MongoDB
+        self.giveaway_data.remove_giveaway(msg_id)
+
+        summary = f" ({', '.join(deleted_messages)} deleted)" if deleted_messages else ""
+        await interaction.followup.send(
+            f"✅ Giveaway **{giveaway.title}** has been permanently deleted{summary}.", ephemeral=True
+        )
+
+    @delete_giveaway.autocomplete("message_id")
+    async def delete_giveaway_autocomplete(self, interaction: discord.Interaction, current: str):
+        return await self._giveaway_autocomplete(current)
 
 
 async def setup(bot: commands.Bot):
