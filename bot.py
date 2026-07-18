@@ -41,6 +41,7 @@ COGS = [
     'cogs.invites',
     'cogs.embed_activity',  # /embed sender + /activity presence setter
     'cogs.promotion',       # /promote and /demote (Helper -> Mod -> Admin)
+    'cogs.ai_chat',         # conversational AI — replies on @mention or reply-to-bot
 
 ]
 

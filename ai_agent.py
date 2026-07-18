@@ -373,6 +373,25 @@ def _call_groq(messages):
     return resp.json()
 
 
+def simple_chat(messages: list, temperature: float = 0.7, max_tokens: int = 600) -> str:
+    """Plain conversational completion — no tools. Used by cogs/ai_chat.py for
+    @mention / reply-to-bot conversations in Discord itself (not the dashboard
+    agent, which uses run_agent_turn below)."""
+    if not GROQ_API_KEY:
+        raise RuntimeError("GROQ_API_KEY environment variable is not set.")
+    headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
+    payload = {
+        "model": GROQ_MODEL,
+        "messages": messages,
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+    }
+    resp = requests.post(GROQ_API_URL, headers=headers, json=payload, timeout=30)
+    resp.raise_for_status()
+    data = resp.json()
+    return data["choices"][0]["message"]["content"] or "..."
+
+
 def run_agent_turn(guild_id: int, history: list, user_message: str, discord_api, db):
     """
     Runs one user turn to completion: repeatedly calls Groq, executing any
