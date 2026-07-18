@@ -429,8 +429,7 @@ class Moderation(commands.Cog):
     async def lock(self, interaction: discord.Interaction, reason: str = "No reason provided."):
         channel = interaction.channel
         cfg = get_guild_config(interaction.client.db, interaction.guild.id)
-        staff_role_name = cfg["STAFF_ROLE"]
-        staff_role = discord.utils.get(interaction.guild.roles, name=staff_role_name)
+        staff_role = interaction.guild.get_role(cfg["STAFF_ROLE_ID"]) if cfg["STAFF_ROLE_ID"] else None
         everyone = interaction.guild.default_role
 
         # Safely check current overwrite status
@@ -440,7 +439,7 @@ class Moderation(commands.Cog):
             return
 
         if not staff_role:
-            await interaction.response.send_message(f"❌ Staff role '{staff_role_name}' not found. Please create it first.", ephemeral=True)
+            await interaction.response.send_message("❌ No Staff role is configured on the dashboard yet. Please set one first.", ephemeral=True)
             return
 
         try:

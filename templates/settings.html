@@ -150,13 +150,45 @@
         <!-- CONFIG & ROLES CARD -->
         <div id="config" class="card">
             <h3>Bot Config & Role Names</h3>
-            <p>Change the role names the bot looks for. Must match your server roles exactly!</p>
+            <p>Pick the actual roles from your server — no more typing names that have to match exactly.</p>
             <form method="POST">
                 <input type="hidden" name="form_type" value="config">
-                <div class="form-group"><label>Staff Role Name</label><input type="text" name="STAFF_ROLE" value="{% if settings.config %}{{ settings.config.STAFF_ROLE }}{% else %}Staff{% endif %}" required></div>
-                <div class="form-group"><label>Moderator Role Name</label><input type="text" name="MOD_ROLE" value="{% if settings.config %}{{ settings.config.MOD_ROLE }}{% else %}Moderator{% endif %}" required></div>
-                <div class="form-group"><label>Admin Role Name</label><input type="text" name="ADMIN_ROLE" value="{% if settings.config %}{{ settings.config.ADMIN_ROLE }}{% else %}Admin{% endif %}" required></div>
-                <div class="form-group"><label>Trusted Staff Role Name</label><input type="text" name="TRUSTED_STAFF_ROLE" value="{% if settings.config %}{{ settings.config.TRUSTED_STAFF_ROLE }}{% else %}Trusted Staff{% endif %}" required></div>
+                <div class="form-group">
+                    <label>Staff Role</label>
+                    <select name="STAFF_ROLE">
+                        <option value="none">None</option>
+                        {% for role in roles|sort(attribute='position', reverse=True) %}
+                        <option value="{{ role.id }}" {% if settings.config and settings.config.STAFF_ROLE and settings.config.STAFF_ROLE|string == role.id|string %}selected{% endif %}>{{ role.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Moderator Role</label>
+                    <select name="MOD_ROLE">
+                        <option value="none">None</option>
+                        {% for role in roles %}
+                        <option value="{{ role.id }}" {% if settings.config and settings.config.MOD_ROLE and settings.config.MOD_ROLE|string == role.id|string %}selected{% endif %}>{{ role.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Admin Role</label>
+                    <select name="ADMIN_ROLE">
+                        <option value="none">None</option>
+                        {% for role in roles %}
+                        <option value="{{ role.id }}" {% if settings.config and settings.config.ADMIN_ROLE and settings.config.ADMIN_ROLE|string == role.id|string %}selected{% endif %}>{{ role.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Trusted Staff Role</label>
+                    <select name="TRUSTED_STAFF_ROLE">
+                        <option value="none">None</option>
+                        {% for role in roles %}
+                        <option value="{{ role.id }}" {% if settings.config and settings.config.TRUSTED_STAFF_ROLE and settings.config.TRUSTED_STAFF_ROLE|string == role.id|string %}selected{% endif %}>{{ role.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
                 <div class="form-group">
                     <label>Mod-Logs Channel</label>
                     <select name="LOG_CHANNEL_ID">
@@ -196,6 +228,27 @@
                     <span class="helper-text">Where winners are asked to leave a vouch after their giveaway prize is paid out.</span>
                 </div>
                 <button type="submit">Save Config</button>
+            </form>
+
+            <hr>
+
+            <h3>Promotion System (/promote &amp; /demote)</h3>
+            <p>Roles are now picked directly when you run /promote or /demote in Discord. Just set where announcements should be posted below.</p>
+            <form method="POST">
+                <input type="hidden" name="form_type" value="promotion_config">
+
+                <div class="form-group">
+                    <label>Promotion/Demotion Announcement Channel</label>
+                    <select name="PROMOTE_ANNOUNCE_CHANNEL_ID">
+                        <option value="none" {% if not settings.building.config or not settings.building.config.PROMOTE_ANNOUNCE_CHANNEL_ID %}selected{% endif %}>Disabled</option>
+                        {% for channel in channels|sort(attribute='position') %}
+                        <option value="{{ channel.id }}" {% if settings.building.config and settings.building.config.PROMOTE_ANNOUNCE_CHANNEL_ID and settings.building.config.PROMOTE_ANNOUNCE_CHANNEL_ID|int == channel.id|int %}selected{% endif %}># {{ channel.name }}</option>
+                        {% endfor %}
+                    </select>
+                    <span class="helper-text">Every /promote and /demote posts a message here. Leave disabled to turn announcements off.</span>
+                </div>
+
+                <button type="submit">Save Promotion Settings</button>
             </form>
         </div>
 
@@ -262,33 +315,14 @@
                 <input type="hidden" name="form_type" value="building_config">
                 
                 <div class="form-group">
-                    <label>T1 Builder Role</label>
-                    <select name="BUILDER_T1_ROLE_ID">
+                    <label>Builder Role</label>
+                    <select name="BUILDER_ROLE_ID">
                         <option value="none">None</option>
                         {% for role in roles|sort(attribute='position', reverse=True) %}
-                        <option value="{{ role.id }}" {% if settings.building.config and settings.building.config.BUILDER_T1_ROLE_ID|string == role.id|string %}selected{% endif %}>{{ role.name }}</option>
+                        <option value="{{ role.id }}" {% if settings.building.config and settings.building.config.BUILDER_ROLE_ID|string == role.id|string %}selected{% endif %}>{{ role.name }}</option>
                         {% endfor %}
                     </select>
-                </div>
-                
-                <div class="form-group">
-                    <label>T2 Builder Role</label>
-                    <select name="BUILDER_T2_ROLE_ID">
-                        <option value="none">None</option>
-                        {% for role in roles %}
-                        <option value="{{ role.id }}" {% if settings.building.config and settings.building.config.BUILDER_T2_ROLE_ID|string == role.id|string %}selected{% endif %}>{{ role.name }}</option>
-                        {% endfor %}
-                    </select>
-                </div>
-                
-                <div class="form-group">
-                    <label>T3 Builder Role</label>
-                    <select name="BUILDER_T3_ROLE_ID">
-                        <option value="none">None</option>
-                        {% for role in roles %}
-                        <option value="{{ role.id }}" {% if settings.building.config and settings.building.config.BUILDER_T3_ROLE_ID|string == role.id|string %}selected{% endif %}>{{ role.name }}</option>
-                        {% endfor %}
-                    </select>
+                    <span class="helper-text">The single role that can see, claim, and manage build tickets.</span>
                 </div>
                 
                 <hr>

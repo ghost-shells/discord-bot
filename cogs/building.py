@@ -22,10 +22,9 @@ logger = logging.getLogger(__name__)
 def is_builder(interaction: discord.Interaction) -> bool:
     cfg = get_guild_config(interaction.client.db, interaction.guild.id)
     user_role_ids = {r.id for r in interaction.user.roles}
-    for key in ("BUILDER_T1_ROLE_ID", "BUILDER_T2_ROLE_ID", "BUILDER_T3_ROLE_ID"):
-        raw = cfg.get(key)
-        if raw and int(raw) in user_role_ids:
-            return True
+    raw = cfg.get("BUILDER_ROLE_ID")
+    if raw and int(raw) in user_role_ids:
+        return True
     return interaction.user.guild_permissions.administrator
 
 def has_cmd_perm(interaction: discord.Interaction, command_name: str) -> bool:
@@ -320,8 +319,8 @@ async def create_build_ticket_from_modal(bot, guild, buyer, build, modal_data, r
     db = bot.db
     cfg = get_guild_config(db, guild.id)
 
-    trusted_staff_name = cfg.get("TRUSTED_STAFF_ROLE")
-    trusted_staff = discord.utils.get(guild.roles, name=trusted_staff_name) if trusted_staff_name else None
+    trusted_staff_id = cfg.get("TRUSTED_STAFF_ROLE_ID")
+    trusted_staff = guild.get_role(trusted_staff_id) if trusted_staff_id else None
     if not trusted_staff:
         logger.error(f"Trusted Staff role not found for guild {guild.id}")
         return
@@ -334,9 +333,7 @@ async def create_build_ticket_from_modal(bot, guild, buyer, build, modal_data, r
         logger.error(f"Confirmation role (295) not found for guild {guild.id}")
         return
 
-    t1_role = guild.get_role(cfg.get("BUILDER_T1_ROLE_ID")) if cfg.get("BUILDER_T1_ROLE_ID") else None
-    t2_role = guild.get_role(cfg.get("BUILDER_T2_ROLE_ID")) if cfg.get("BUILDER_T2_ROLE_ID") else None
-    t3_role = guild.get_role(cfg.get("BUILDER_T3_ROLE_ID")) if cfg.get("BUILDER_T3_ROLE_ID") else None
+    builder_role = guild.get_role(cfg.get("BUILDER_ROLE_ID")) if cfg.get("BUILDER_ROLE_ID") else None
 
     cat = discord.utils.get(guild.categories, name="Building")
     if not cat:
@@ -349,9 +346,7 @@ async def create_build_ticket_from_modal(bot, guild, buyer, build, modal_data, r
         trusted_staff: discord.PermissionOverwrite(read_messages=True, send_messages=True),
         confirmation_role: discord.PermissionOverwrite(read_messages=True, send_messages=True)
     }
-    if t1_role: overwrites[t1_role] = discord.PermissionOverwrite(read_messages=True, send_messages=True)
-    if t2_role: overwrites[t2_role] = discord.PermissionOverwrite(read_messages=True, send_messages=True)
-    if t3_role: overwrites[t3_role] = discord.PermissionOverwrite(read_messages=True, send_messages=True)
+    if builder_role: overwrites[builder_role] = discord.PermissionOverwrite(read_messages=True, send_messages=True)
 
     channel = await guild.create_text_channel(
         name=f"build-{buyer.name.lower()}",
@@ -394,8 +389,8 @@ async def create_build_ticket_from_modal(bot, guild, buyer, build, modal_data, r
     await channel.send("**Staff Controls**", view=close_view)
 
     await channel.send(f"{confirmation_role.mention} A new build ticket has been opened!", delete_after=10)
-    if t3_role:
-        await channel.send(f"{t3_role.mention} New build order! Please review and claim.")
+    if builder_role:
+        await channel.send(f"{builder_role.mention} New build order! Please review and claim.")
 
     await buyer.send(f"✅ Your build ticket for **{build['name']}** has been created: {channel.mention}")
 
@@ -415,8 +410,8 @@ async def create_custom_build_ticket(bot, guild, buyer, build, modal_data):
     db = bot.db
     cfg = get_guild_config(db, guild.id)
 
-    trusted_staff_name = cfg.get("TRUSTED_STAFF_ROLE")
-    trusted_staff = discord.utils.get(guild.roles, name=trusted_staff_name) if trusted_staff_name else None
+    trusted_staff_id = cfg.get("TRUSTED_STAFF_ROLE_ID")
+    trusted_staff = guild.get_role(trusted_staff_id) if trusted_staff_id else None
     if not trusted_staff:
         logger.error(f"create_custom_build_ticket: Trusted Staff role not found for guild {guild.id}")
         return
@@ -429,9 +424,7 @@ async def create_custom_build_ticket(bot, guild, buyer, build, modal_data):
         logger.error(f"create_custom_build_ticket: Confirmation role not found for guild {guild.id}")
         return
 
-    t1_role = guild.get_role(cfg.get("BUILDER_T1_ROLE_ID")) if cfg.get("BUILDER_T1_ROLE_ID") else None
-    t2_role = guild.get_role(cfg.get("BUILDER_T2_ROLE_ID")) if cfg.get("BUILDER_T2_ROLE_ID") else None
-    t3_role = guild.get_role(cfg.get("BUILDER_T3_ROLE_ID")) if cfg.get("BUILDER_T3_ROLE_ID") else None
+    builder_role = guild.get_role(cfg.get("BUILDER_ROLE_ID")) if cfg.get("BUILDER_ROLE_ID") else None
 
     cat = discord.utils.get(guild.categories, name="Building")
     if not cat:
@@ -440,14 +433,14 @@ async def create_custom_build_ticket(bot, guild, buyer, build, modal_data):
 
     overwrites = {
         guild.default_role: discord.PermissionOverwrite(read_messages=False),
-        # Buyer can read but NOT send messages until price is set and paid
-        buyer: discord.PermissionOverwrite(read_messages=True, send_messages=False),
+        # Buyer CAN send messages immediately — staff need to know what they want
+        # before a price can even be quoted. They only get locked once the ticket
+        # is fully resolved (completed/cancelled/closed).
+        buyer: discord.PermissionOverwrite(read_messages=True, send_messages=True),
         trusted_staff: discord.PermissionOverwrite(read_messages=True, send_messages=True),
         confirmation_role: discord.PermissionOverwrite(read_messages=True, send_messages=True),
     }
-    if t1_role: overwrites[t1_role] = discord.PermissionOverwrite(read_messages=True, send_messages=True)
-    if t2_role: overwrites[t2_role] = discord.PermissionOverwrite(read_messages=True, send_messages=True)
-    if t3_role: overwrites[t3_role] = discord.PermissionOverwrite(read_messages=True, send_messages=True)
+    if builder_role: overwrites[builder_role] = discord.PermissionOverwrite(read_messages=True, send_messages=True)
 
     channel = await guild.create_text_channel(
         name=f"build-{buyer.name.lower()}",
@@ -481,7 +474,8 @@ async def create_custom_build_ticket(bot, guild, buyer, build, modal_data):
             f"**IGN:** `{modal_data['ign']}`\n"
             f"**Region:** `{modal_data['region']}`\n"
             f"**Farm Name:** `{modal_data['farm_name']}`\n\n"
-            f"⏳ A staff member will review your request and set a price using `/build money`.\n"
+            f"💬 Please describe exactly what you want built (design, size, materials, etc.) below "
+            f"— a staff member will review your request and set a price using `/build money`.\n"
             f"Once the price is set you will be pinged with a 30-minute payment window."
         ),
         color=0xf1c40f,
@@ -776,8 +770,8 @@ async def post_order_to_builder_channel(interaction_or_bot, ticket_channel_id: i
     ping_role_id = fresh_cfg.get("BUILD_ORDER_PING_ROLE_ID")
     ping_role = guild.get_role(ping_role_id) if ping_role_id else None
     if not ping_role:
-        t3_role_id = fresh_cfg.get("BUILDER_T3_ROLE_ID")
-        ping_role = guild.get_role(t3_role_id) if t3_role_id else None
+        builder_role_id = fresh_cfg.get("BUILDER_ROLE_ID")
+        ping_role = guild.get_role(builder_role_id) if builder_role_id else None
     if ping_role:
         await orders_channel.send(f"{ping_role.mention} New build order available! ⬆️")
 
@@ -935,15 +929,15 @@ class Building(commands.Cog):
         )
         for guild in self.bot.guilds:
             cfg = self.bot.db["bot_config"].find_one({"guild_id": guild.id}) or {}
-            trusted_staff_name = cfg.get("TRUSTED_STAFF_ROLE")
-            trusted_staff = discord.utils.get(guild.roles, name=trusted_staff_name) if trusted_staff_name else None
-            t1_role = guild.get_role(cfg.get("BUILDER_T1_ROLE_ID")) if cfg.get("BUILDER_T1_ROLE_ID") else None
+            trusted_staff_id = cfg.get("TRUSTED_STAFF_ROLE")
+            trusted_staff = guild.get_role(trusted_staff_id) if trusted_staff_id else None
+            builder_role = guild.get_role(cfg.get("BUILDER_ROLE_ID")) if cfg.get("BUILDER_ROLE_ID") else None
             for channel in guild.text_channels:
                 if channel.id not in active_channel_ids:
                     continue
                 try:
                     if trusted_staff: await channel.set_permissions(trusted_staff, read_messages=True, send_messages=True)
-                    if t1_role: await channel.set_permissions(t1_role, read_messages=True, send_messages=True)
+                    if builder_role: await channel.set_permissions(builder_role, read_messages=True, send_messages=True)
                 except discord.Forbidden:
                     pass
 
@@ -987,7 +981,7 @@ class Building(commands.Cog):
 
     @build_group.command(name="paid", description="Mark a build ticket as paid (bypasses button)")
     async def build_paid(self, interaction: discord.Interaction):
-        if not has_cmd_perm(interaction, "build paid"):
+        if not (is_builder(interaction) or has_cmd_perm(interaction, "build paid")):
             return await interaction.response.send_message("❌ You do not have permission to use this command.", ephemeral=True)
         db = interaction.client.db
         order = db["building_orders"].find_one({"ticket_channel_id": interaction.channel.id})
@@ -997,6 +991,11 @@ class Building(commands.Cog):
             return await interaction.response.send_message("❌ This order is already confirmed.", ephemeral=True)
         if order["status"] in ("completed", "cancelled"):
             return await interaction.response.send_message(f"❌ This order is already `{order['status']}` and cannot be paid.", ephemeral=True)
+        if parse_price(str(order.get("price", ""))) is None:
+            return await interaction.response.send_message(
+                "❌ No price has been set on this order yet — use `/build money` to set a price first.",
+                ephemeral=True
+            )
         buyer = interaction.guild.get_member(order["buyer_id"])
         if buyer:
             overwrites = interaction.channel.overwrites_for(buyer)
@@ -1035,7 +1034,7 @@ class Building(commands.Cog):
     @build_group.command(name="money", description="Set the money owed on a ticket")
     @app_commands.describe(amount="The new price/amount owed (e.g. '500k' or '$10')")
     async def build_money(self, interaction: discord.Interaction, amount: str):
-        if not has_cmd_perm(interaction, "build money"):
+        if not (is_builder(interaction) or has_cmd_perm(interaction, "build money")):
             return await interaction.response.send_message("❌ You do not have permission to use this command.", ephemeral=True)
         db = interaction.client.db
         order = db["building_orders"].find_one({"ticket_channel_id": interaction.channel.id})
@@ -1117,7 +1116,7 @@ class Building(commands.Cog):
 
     @build_group.command(name="claim", description="Claim a build ticket for yourself")
     async def build_claim(self, interaction: discord.Interaction):
-        if not has_cmd_perm(interaction, "build claim"):
+        if not (is_builder(interaction) or has_cmd_perm(interaction, "build claim")):
             return await interaction.response.send_message("❌ You do not have permission to use this command.", ephemeral=True)
         db = interaction.client.db
         order = db["building_orders"].find_one({"ticket_channel_id": interaction.channel.id})
@@ -1144,7 +1143,7 @@ class Building(commands.Cog):
 
     @build_group.command(name="complete", description="Mark a build ticket as completed")
     async def build_complete(self, interaction: discord.Interaction):
-        if not has_cmd_perm(interaction, "build complete"):
+        if not (is_builder(interaction) or has_cmd_perm(interaction, "build complete")):
             return await interaction.response.send_message("❌ You do not have permission to use this command.", ephemeral=True)
         db = interaction.client.db
         order = db["building_orders"].find_one({"ticket_channel_id": interaction.channel.id})
@@ -1157,16 +1156,21 @@ class Building(commands.Cog):
         if order["status"] not in ("claimed", "confirmed"):
             return await interaction.response.send_message("❌ This order must be claimed before it can be completed.", ephemeral=True)
         db["building_orders"].update_one({"ticket_channel_id": interaction.channel.id}, {"$set": {"status": "completed"}})
-        embed = discord.Embed(title="🎉 Build Completed", description="This order has been marked as completed. Closing in 5 seconds...", color=0x2ecc71)
+        embed = discord.Embed(title="🎉 Build Completed", description="This order has been marked as completed. Generating transcript and closing in 5 seconds...", color=0x2ecc71)
         await interaction.response.send_message(embed=embed)
         await asyncio.sleep(5)
         try:
-            await interaction.channel.delete(reason="Build completed")
-        except Exception: pass
+            await _close_ticket(interaction.channel, interaction.user, db)
+        except Exception as e:
+            logger.error(f"build_complete: failed to close ticket via _close_ticket: {e}")
+            try:
+                await interaction.channel.delete(reason="Build completed")
+            except Exception:
+                pass
 
     @build_group.command(name="cancel", description="Cancel and close a build ticket")
     async def build_cancel(self, interaction: discord.Interaction):
-        if not has_cmd_perm(interaction, "build cancel"):
+        if not (is_builder(interaction) or has_cmd_perm(interaction, "build cancel")):
             return await interaction.response.send_message("❌ You do not have permission to use this command.", ephemeral=True)
         db = interaction.client.db
         order = db["building_orders"].find_one({"ticket_channel_id": interaction.channel.id})
@@ -1177,16 +1181,21 @@ class Building(commands.Cog):
         if order["status"] == "completed":
             return await interaction.response.send_message("❌ This order is already completed and cannot be cancelled.", ephemeral=True)
         db["building_orders"].update_one({"ticket_channel_id": interaction.channel.id}, {"$set": {"status": "cancelled"}})
-        await interaction.response.send_message("❌ Ticket cancelled. Closing in 3 seconds...")
+        await interaction.response.send_message("❌ Ticket cancelled. Generating transcript and closing in 3 seconds...")
         await asyncio.sleep(3)
         try:
-            await interaction.channel.delete(reason="Build cancelled")
-        except Exception: pass
+            await _close_ticket(interaction.channel, interaction.user, db)
+        except Exception as e:
+            logger.error(f"build_cancel: failed to close ticket via _close_ticket: {e}")
+            try:
+                await interaction.channel.delete(reason="Build cancelled")
+            except Exception:
+                pass
 
     @build_group.command(name="addnote", description="Add a staff note to the build ticket")
     @app_commands.describe(note="The note to add to the ticket logs")
     async def build_addnote(self, interaction: discord.Interaction, note: str):
-        if not has_cmd_perm(interaction, "build addnote"):
+        if not (is_builder(interaction) or has_cmd_perm(interaction, "build addnote")):
             return await interaction.response.send_message("❌ You do not have permission to use this command.", ephemeral=True)
         db = interaction.client.db
         order = db["building_orders"].find_one({"ticket_channel_id": interaction.channel.id})
@@ -1205,15 +1214,15 @@ class Building(commands.Cog):
     @commands.Cog.listener()
     async def on_member_update(self, before: discord.Member, after: discord.Member):
         cfg = self.bot.db["bot_config"].find_one({"guild_id": after.guild.id}) or {}
-        t1_role_id = cfg.get("BUILDER_T1_ROLE_ID")
-        t1_role = after.guild.get_role(t1_role_id) if t1_role_id else None
-        trusted_staff_name = cfg.get("TRUSTED_STAFF_ROLE")
-        trusted_staff = discord.utils.get(after.guild.roles, name=trusted_staff_name) if trusted_staff_name else None
+        builder_role_id = cfg.get("BUILDER_ROLE_ID")
+        builder_role = after.guild.get_role(builder_role_id) if builder_role_id else None
+        trusted_staff_id = cfg.get("TRUSTED_STAFF_ROLE")
+        trusted_staff = after.guild.get_role(trusted_staff_id) if trusted_staff_id else None
 
-        gained_t1 = t1_role and t1_role in after.roles and t1_role not in before.roles
+        gained_builder = builder_role and builder_role in after.roles and builder_role not in before.roles
         gained_trusted = trusted_staff and trusted_staff in after.roles and trusted_staff not in before.roles
 
-        if gained_t1 or gained_trusted:
+        if gained_builder or gained_trusted:
             for ch in after.guild.text_channels:
                 if ch.name.startswith("build-"):
                     try: await ch.set_permissions(after, read_messages=True, send_messages=True)

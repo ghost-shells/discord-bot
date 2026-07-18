@@ -256,7 +256,7 @@ class TicketView(discord.ui.View):
             or interaction.channel.name.endswith(f"-{uname}")
             or interaction.channel.name.endswith(f"-{disp}")
         )
-        staff_role  = discord.utils.get(interaction.guild.roles, name=cfg["STAFF_ROLE"])
+        staff_role  = interaction.guild.get_role(cfg["STAFF_ROLE_ID"]) if cfg["STAFF_ROLE_ID"] else None
         is_staff    = interaction.user.guild_permissions.administrator or (
             staff_role and staff_role in interaction.user.roles
         )
@@ -264,7 +264,7 @@ class TicketView(discord.ui.View):
             return await interaction.response.send_message(
                 "❌ Only the ticket creator or staff can request a close.", ephemeral=True
             )
-        mention = staff_role.mention if staff_role else f"@{cfg['STAFF_ROLE']}"
+        mention = staff_role.mention if staff_role else "@Staff"
         await interaction.response.send_message(
             f"{mention}\n**{interaction.user.mention}** has requested to close this ticket."
         )
@@ -272,7 +272,7 @@ class TicketView(discord.ui.View):
     @discord.ui.button(label="Close Ticket", style=discord.ButtonStyle.red, custom_id="dyn_close_v1")
     async def close_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         cfg        = get_guild_config(interaction.client.db, interaction.guild.id)
-        staff_role = discord.utils.get(interaction.guild.roles, name=cfg["STAFF_ROLE"])
+        staff_role = interaction.guild.get_role(cfg["STAFF_ROLE_ID"]) if cfg["STAFF_ROLE_ID"] else None
         is_staff   = interaction.user.guild_permissions.administrator or (
             staff_role and staff_role in interaction.user.roles
         )
@@ -548,7 +548,7 @@ class Tickets(commands.Cog):
                 "❌ This can only be used in ticket channels.", ephemeral=True
             )
         cfg        = get_guild_config(interaction.client.db, interaction.guild.id)
-        staff_role = discord.utils.get(interaction.guild.roles, name=cfg["STAFF_ROLE"])
+        staff_role = interaction.guild.get_role(cfg["STAFF_ROLE_ID"]) if cfg["STAFF_ROLE_ID"] else None
         creator    = get_creator_name(interaction.channel)
         uname      = interaction.user.name.lower()
 

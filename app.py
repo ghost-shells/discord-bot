@@ -6,6 +6,7 @@ from flask import Flask, render_template, redirect, request, session, Response, 
 import requests
 from dotenv import load_dotenv
 from db import get_bot_token, get_db, test_mongodb
+import ai_agent  # AI admin agent (Groq tool-calling)
 from bson.objectid import ObjectId
 from flask import abort
 from datetime import datetime, timedelta
@@ -396,10 +397,10 @@ def guild_dashboard(guild_id):
                 {"guild_id": guild_id},
                 {
                     "$set": {
-                        "STAFF_ROLE": staff_role,
-                        "MOD_ROLE": mod_role,
-                        "ADMIN_ROLE": admin_role,
-                        "TRUSTED_STAFF_ROLE": trusted_staff_role,
+                        "STAFF_ROLE": int(staff_role) if staff_role and staff_role != "none" else None,
+                        "MOD_ROLE": int(mod_role) if mod_role and mod_role != "none" else None,
+                        "ADMIN_ROLE": int(admin_role) if admin_role and admin_role != "none" else None,
+                        "TRUSTED_STAFF_ROLE": int(trusted_staff_role) if trusted_staff_role and trusted_staff_role != "none" else None,
                         "LOG_CHANNEL_ID": int(log_channel_id) if log_channel_id and log_channel_id != "none" else None,
                         "TRANSCRIPT_CHANNEL_ID": int(transcript_channel_id)
                         if transcript_channel_id and transcript_channel_id != "none"
@@ -477,9 +478,7 @@ def guild_dashboard(guild_id):
                 )
 
         elif form_type == "building_config":
-            t1 = request.form.get("BUILDER_T1_ROLE_ID")
-            t2 = request.form.get("BUILDER_T2_ROLE_ID")
-            t3 = request.form.get("BUILDER_T3_ROLE_ID")
+            builder_role = request.form.get("BUILDER_ROLE_ID")
             ticket_ping = request.form.get("BUILD_TICKET_PING_ROLE_ID")
             order_ping = request.form.get("BUILD_ORDER_PING_ROLE_ID")
             payment_method = request.form.get("PAYMENT_METHOD", "")
@@ -490,14 +489,16 @@ def guild_dashboard(guild_id):
             db["bot_config"].update_one(
                 {"guild_id": guild_id},
                 {"$set": {
-                    "BUILDER_T1_ROLE_ID": int(t1) if t1 and t1 != "none" else None,
-                    "BUILDER_T2_ROLE_ID": int(t2) if t2 and t2 != "none" else None,
-                    "BUILDER_T3_ROLE_ID": int(t3) if t3 and t3 != "none" else None,
+                    "BUILDER_ROLE_ID": int(builder_role) if builder_role and builder_role != "none" else None,
                     "BUILD_TICKET_PING_ROLE_ID": int(ticket_ping) if ticket_ping and ticket_ping != "none" else None,
                     "BUILD_ORDER_PING_ROLE_ID": int(order_ping) if order_ping and order_ping != "none" else None,
                     "PAYMENT_METHOD": payment_method.strip() if payment_method else "",
                     "PAYMENT_RECEIVER_IGN": payment_receiver_ign if payment_receiver_ign else None,
                     "PAYMENT_LOG_CHANNEL_ID": int(payment_log_channel_id) if payment_log_channel_id and payment_log_channel_id != "none" else None,
+                    # Unset legacy tier fields so old data doesn't linger/confuse the dashboard
+                    "BUILDER_T1_ROLE_ID": None,
+                    "BUILDER_T2_ROLE_ID": None,
+                    "BUILDER_T3_ROLE_ID": None,
                 }},
                 upsert=True
             )
@@ -547,6 +548,17 @@ def guild_dashboard(guild_id):
                     {"$pull": {"builds": {"id": build_id}}}
                 )
 
+        elif form_type == "promotion_config":
+            announce_channel_id = request.form.get("PROMOTE_ANNOUNCE_CHANNEL_ID")
+
+            db["bot_config"].update_one(
+                {"guild_id": guild_id},
+                {"$set": {
+                    "PROMOTE_ANNOUNCE_CHANNEL_ID": int(announce_channel_id) if announce_channel_id and announce_channel_id != "none" else None,
+                }},
+                upsert=True
+            )
+
         elif form_type == "delete_app":
             app_id = request.form.get("delete_app_id")
             if app_id:
@@ -582,10 +594,10 @@ def guild_dashboard(guild_id):
         "automod": db["automod_settings"].find_one({"guild_id": guild_id}),
         "config": (
             lambda cfg: {
-                "STAFF_ROLE": cfg.get("STAFF_ROLE", "Staff"),
-                "MOD_ROLE": cfg.get("MOD_ROLE", "Moderator"),
-                "ADMIN_ROLE": cfg.get("ADMIN_ROLE", "Admin"),
-                "TRUSTED_STAFF_ROLE": cfg.get("TRUSTED_STAFF_ROLE", "Trusted Staff"),
+                "STAFF_ROLE": cfg.get("STAFF_ROLE"),
+                "MOD_ROLE": cfg.get("MOD_ROLE"),
+                "ADMIN_ROLE": cfg.get("ADMIN_ROLE"),
+                "TRUSTED_STAFF_ROLE": cfg.get("TRUSTED_STAFF_ROLE"),
                 "LOG_CHANNEL_ID": cfg.get("LOG_CHANNEL_ID"),
                 "TRANSCRIPT_CHANNEL_ID": cfg.get("TRANSCRIPT_CHANNEL_ID"),
                 "BUILDER_ORDERS_CHANNEL_ID": cfg.get("BUILDER_ORDERS_CHANNEL_ID"),
@@ -1548,6 +1560,164 @@ def console_lookup_user(guild_id):
             "avatar": user.get("avatar"),
         })
     return jsonify(results)
+
+
+# ── AI Admin Agent ───────────────────────────────────────────────────────────
+# Natural-language console: staff type a request, Groq decides which tool(s)
+# to call. Read-only tools (lookups, summaries) run immediately; anything
+# that changes the server comes back as a "pending_action" that the UI shows
+# as a Confirm/Cancel step before it's actually executed.
+
+@app.route("/dashboard/<int:guild_id>/console/agent")
+def bot_agent(guild_id):
+    """Renders the AI agent chat page."""
+    if "access_token" not in session:
+        return redirect("/")
+
+    user_guild_ids = [int(g["id"]) for g in session.get("guilds", [])]
+    if guild_id not in user_guild_ids:
+        abort(403)
+
+    if not bot_in_guild(guild_id):
+        return redirect(f"/dashboard?bot_missing={guild_id}")
+
+    if not BOT_TOKEN:
+        return "<h1>Error: DISCORD_BOT_TOKEN or DISCORD_TOKEN is missing from environment variables!</h1>", 500
+
+    if not ai_agent.GROQ_API_KEY:
+        return "<h1>Error: GROQ_API_KEY environment variable is not set!</h1>", 500
+
+    guild_name = next((g["name"] for g in session.get("guilds", []) if int(g["id"]) == guild_id), "Server")
+    return render_template("agent.html", guild_id=guild_id, guild_name=guild_name)
+
+
+@app.route("/dashboard/<int:guild_id>/console/agent/chat", methods=["POST"])
+def bot_agent_chat(guild_id):
+    """AJAX: run one turn of the agent. Body: { message, history }."""
+    access_error = _require_guild_access_json(guild_id)
+    if access_error:
+        return access_error
+
+    if not BOT_TOKEN:
+        return jsonify({"ok": False, "error": "Bot token not configured."}), 500
+    if not ai_agent.GROQ_API_KEY:
+        return jsonify({"ok": False, "error": "GROQ_API_KEY not configured on the server."}), 500
+
+    data = request.get_json(silent=True) or {}
+    user_message = (data.get("message") or "").strip()
+    history = data.get("history") or []
+    if not user_message:
+        return jsonify({"ok": False, "error": "Empty message."}), 400
+
+    try:
+        result = ai_agent.run_agent_turn(guild_id, history, user_message, _discord_api, db)
+    except Exception as e:
+        logger.error(f"Agent turn failed for guild {guild_id}: {e}")
+        return jsonify({"ok": False, "error": f"Agent error: {e}"}), 500
+
+    return jsonify({"ok": True, **result})
+
+
+@app.route("/dashboard/<int:guild_id>/console/agent/execute", methods=["POST"])
+def bot_agent_execute(guild_id):
+    """AJAX: execute a destructive tool call the user confirmed. Body: { tool, args }."""
+    access_error = _require_guild_access_json(guild_id)
+    if access_error:
+        return access_error
+
+    if not BOT_TOKEN:
+        return jsonify({"ok": False, "error": "Bot token not configured."}), 500
+
+    data = request.get_json(silent=True) or {}
+    tool = data.get("tool")
+    args = data.get("args") or {}
+
+    if tool not in ai_agent.DESTRUCTIVE_TOOLS:
+        return jsonify({"ok": False, "error": "That tool isn't executable via this endpoint."}), 400
+
+    user_id = str(args.get("user_id", "") or "")
+    reason = (args.get("reason") or "Requested via AI agent").strip()
+    ok, error, detail = False, None, ""
+
+    try:
+        if tool == "kick_member":
+            r = _discord_api("DELETE", f"/guilds/{guild_id}/members/{user_id}", reason=reason)
+            ok = r.ok
+            error = None if ok else _discord_err(r)
+            detail = reason
+
+        elif tool == "ban_member":
+            delete_days = max(0, min(7, int(args.get("delete_days", 0) or 0)))
+            r = _discord_api(
+                "PUT", f"/guilds/{guild_id}/bans/{user_id}",
+                reason=reason, json={"delete_message_seconds": delete_days * 86400},
+            )
+            ok = r.ok
+            error = None if ok else _discord_err(r)
+            detail = reason
+
+        elif tool == "unban_member":
+            r = _discord_api("DELETE", f"/guilds/{guild_id}/bans/{user_id}")
+            ok = r.ok
+            error = None if ok else _discord_err(r)
+
+        elif tool == "timeout_member":
+            minutes = max(1, min(40320, int(args.get("minutes", 10) or 10)))
+            until = (datetime.utcnow() + timedelta(minutes=minutes)).isoformat() + "Z"
+            r = _discord_api(
+                "PATCH", f"/guilds/{guild_id}/members/{user_id}",
+                reason=reason, json={"communication_disabled_until": until},
+            )
+            ok = r.ok
+            error = None if ok else _discord_err(r)
+            detail = f"{minutes}m — {reason}"
+
+        elif tool == "remove_timeout":
+            r = _discord_api(
+                "PATCH", f"/guilds/{guild_id}/members/{user_id}",
+                json={"communication_disabled_until": None},
+            )
+            ok = r.ok
+            error = None if ok else _discord_err(r)
+
+        elif tool in ("add_role", "remove_role"):
+            role_id = args.get("role_id")
+            method = "PUT" if tool == "add_role" else "DELETE"
+            r = _discord_api(method, f"/guilds/{guild_id}/members/{user_id}/roles/{role_id}")
+            ok = r.ok
+            error = None if ok else _discord_err(r)
+            detail = f"role {role_id}"
+
+        elif tool == "send_message":
+            channel_id = args.get("channel_id")
+            content = (args.get("content") or "").strip()[:2000]
+            r = _discord_api("POST", f"/channels/{channel_id}/messages", json={"content": content})
+            ok = r.ok
+            error = None if ok else _discord_err(r)
+            detail = f"channel #{channel_id}: {content[:80]}"
+
+        elif tool == "dm_user":
+            content = (args.get("content") or "").strip()[:2000]
+            dm = _discord_api("POST", "/users/@me/channels", json={"recipient_id": user_id})
+            if not dm.ok:
+                ok, error = False, _discord_err(dm)
+            else:
+                dm_channel_id = dm.json()["id"]
+                r = _discord_api("POST", f"/channels/{dm_channel_id}/messages", json={"content": content})
+                ok = r.ok
+                error = None if ok else _discord_err(r)
+            detail = content[:80]
+
+        else:
+            error = "Unknown action."
+
+    except Exception as e:
+        logger.error(f"Agent execute '{tool}' failed: {e}")
+        ok, error = False, str(e)[:300]
+
+    _log_console_action(guild_id, f"agent_{tool}", user_id or args.get("channel_id"), detail, ok, error)
+
+    return jsonify({"ok": ok, "error": error})
 
 
 def _avatar_url(user):

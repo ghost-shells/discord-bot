@@ -160,8 +160,8 @@ class ApplicationActionView(discord.ui.View):
             cat = await guild.create_category("Application Tickets")
             await cat.set_permissions(guild.default_role, read_messages=False)
 
-        trusted_role_name = get_guild_config(interaction.client.db, guild.id)["TRUSTED_STAFF_ROLE"]
-        trusted_role = discord.utils.get(guild.roles, name=trusted_role_name)
+        trusted_role_id = get_guild_config(interaction.client.db, guild.id)["TRUSTED_STAFF_ROLE_ID"]
+        trusted_role = guild.get_role(trusted_role_id) if trusted_role_id else None
         overwrites = {
             guild.default_role: discord.PermissionOverwrite(read_messages=False),
             applicant: discord.PermissionOverwrite(read_messages=True, send_messages=True, read_message_history=True, attach_files=True),
@@ -293,9 +293,9 @@ class Applications(commands.Cog):
             # Send to submitted channel
             submitted_channel = self.bot.get_channel(app_config.get("submitted_channel_id"))
             if submitted_channel:
-                trusted_role_name = get_guild_config(self.bot.db, submitted_channel.guild.id)["TRUSTED_STAFF_ROLE"]
-                trusted_role = discord.utils.get(submitted_channel.guild.roles, name=trusted_role_name)
-                mention = trusted_role.mention if trusted_role else f"@{trusted_role_name}"
+                trusted_role_id = get_guild_config(self.bot.db, submitted_channel.guild.id)["TRUSTED_STAFF_ROLE_ID"]
+                trusted_role = submitted_channel.guild.get_role(trusted_role_id) if trusted_role_id else None
+                mention = trusted_role.mention if trusted_role else "@Trusted Staff"
                 
                 view = ApplicationActionView(session["app_id"], message.author.id, app_config)
                 review_msg = await submitted_channel.send(content=mention, embed=embed, view=view)

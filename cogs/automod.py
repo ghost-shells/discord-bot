@@ -3,7 +3,7 @@ from discord.ext import commands
 from discord import app_commands
 import re
 from datetime import datetime, timezone
-from cogs.config import admin_only, get_guild_config, member_has_role
+from cogs.config import admin_only, get_guild_config, member_has_role_id
 
 class AutoMod(commands.Cog):
     def __init__(self, bot: commands.Bot):
@@ -147,8 +147,8 @@ class AutoMod(commands.Cog):
         if message.author.bot or not message.guild:
             return
 
-        staff_role_name = get_guild_config(self.bot.db, message.guild.id)["STAFF_ROLE"]
-        if member_has_role(message.author, staff_role_name) or message.author.guild_permissions.administrator:
+        staff_role_id = get_guild_config(self.bot.db, message.guild.id)["STAFF_ROLE_ID"]
+        if member_has_role_id(message.author, staff_role_id) or message.author.guild_permissions.administrator:
             return
 
         settings = self.get_settings(message.guild.id)

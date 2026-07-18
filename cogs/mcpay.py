@@ -25,10 +25,10 @@ def is_trusted_staff(interaction: discord.Interaction) -> bool:
     if interaction.user.guild_permissions.administrator:
         return True
     cfg = get_guild_config(interaction.client.db, interaction.guild.id)
-    role_name = cfg.get("TRUSTED_STAFF_ROLE")
-    if not role_name:
+    role_id = cfg.get("TRUSTED_STAFF_ROLE_ID")
+    if not role_id:
         return False
-    role = discord.utils.get(interaction.guild.roles, name=role_name)
+    role = interaction.guild.get_role(role_id)
     return role in interaction.user.roles if role else False
 
 

@@ -42,9 +42,11 @@ class ReactionRoles(commands.Cog):
     @app_commands.describe(message_id="The ID of the message", emoji="The emoji to use", role="The role to give")
     @admin_only()
     async def rr_add(self, interaction: discord.Interaction, message_id: str, emoji: str, role: discord.Role):
+        await interaction.response.defer(ephemeral=True)
+
         try: msg_id = int(message_id)
         except ValueError:
-            await interaction.response.send_message("❌ Invalid Message ID.", ephemeral=True); return
+            await interaction.followup.send("❌ Invalid Message ID.", ephemeral=True); return
 
         found_msg = None
         for channel in interaction.guild.text_channels:
@@ -54,11 +56,11 @@ class ReactionRoles(commands.Cog):
             except (discord.NotFound, discord.Forbidden): continue
         
         if not found_msg:
-            await interaction.response.send_message("❌ Could not find that message.", ephemeral=True); return
+            await interaction.followup.send("❌ Could not find that message.", ephemeral=True); return
 
         try: await found_msg.add_reaction(emoji)
         except (discord.HTTPException, TypeError):
-            await interaction.response.send_message("❌ Invalid emoji, or I don't have access to that emoji.", ephemeral=True); return
+            await interaction.followup.send("❌ Invalid emoji, or I don't have access to that emoji.", ephemeral=True); return
 
         msg_id_str = str(msg_id)
         if msg_id_str not in _react_roles: _react_roles[msg_id_str] = {}
@@ -66,15 +68,17 @@ class ReactionRoles(commands.Cog):
         _react_roles[msg_id_str][emoji] = role.id
         save_react_role(self.bot.db, msg_id, _react_roles[msg_id_str])
 
-        await interaction.response.send_message(f"✅ Reaction role added!\n**Emoji:** {emoji} → **Role:** {role.mention}", ephemeral=True)
+        await interaction.followup.send(f"✅ Reaction role added!\n**Emoji:** {emoji} → **Role:** {role.mention}", ephemeral=True)
 
     @rr_group.command(name="remove", description="Remove a reaction role from a message")
     @app_commands.describe(message_id="The ID of the message", emoji="The emoji to remove")
     @admin_only()
     async def rr_remove(self, interaction: discord.Interaction, message_id: str, emoji: str):
+        await interaction.response.defer(ephemeral=True)
+
         msg_id_str = str(message_id)
         if msg_id_str not in _react_roles or emoji not in _react_roles[msg_id_str]:
-            await interaction.response.send_message("❌ That reaction role doesn't exist.", ephemeral=True); return
+            await interaction.followup.send("❌ That reaction role doesn't exist.", ephemeral=True); return
 
         del _react_roles[msg_id_str][emoji]
         
@@ -94,7 +98,7 @@ class ReactionRoles(commands.Cog):
                 except (discord.NotFound, discord.Forbidden): continue
         except Exception: pass
 
-        await interaction.response.send_message(f"✅ Reaction role removed for {emoji}.", ephemeral=True)
+        await interaction.followup.send(f"✅ Reaction role removed for {emoji}.", ephemeral=True)
 
     @commands.Cog.listener()
     async def on_raw_reaction_add(self, payload: discord.RawReactionActionEvent):
