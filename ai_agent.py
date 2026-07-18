@@ -392,17 +392,123 @@ def simple_chat(messages: list, temperature: float = 0.7, max_tokens: int = 600)
     return data["choices"][0]["message"]["content"] or "..."
 
 
-def run_agent_turn(guild_id: int, history: list, user_message: str, discord_api, db):
+def _run_destructive_tool(tool_name: str, args: dict, guild_id: int, discord_api):
+    """Actually performs a destructive action via the Discord REST API.
+    Shared by app.py's dashboard confirm-execute route and the trusted-staff
+    auto-execute path used from Discord chat (cogs/ai_chat.py)."""
+    from datetime import datetime, timedelta  # local import to avoid a hard dep for read-only-only callers
+
+    user_id = str(args.get("user_id", "") or "")
+    reason = (args.get("reason") or "Requested via AI").strip()
+    ok, error, detail = False, None, ""
+
+    try:
+        if tool_name == "kick_member":
+            r = discord_api("DELETE", f"/guilds/{guild_id}/members/{user_id}", reason=reason)
+            ok = r.ok
+            error = None if ok else f"HTTP {r.status_code}: {r.text[:200]}"
+            detail = reason
+
+        elif tool_name == "ban_member":
+            delete_days = max(0, min(7, int(args.get("delete_days", 0) or 0)))
+            r = discord_api(
+                "PUT", f"/guilds/{guild_id}/bans/{user_id}",
+                reason=reason, json={"delete_message_seconds": delete_days * 86400},
+            )
+            ok = r.ok
+            error = None if ok else f"HTTP {r.status_code}: {r.text[:200]}"
+            detail = reason
+
+        elif tool_name == "unban_member":
+            r = discord_api("DELETE", f"/guilds/{guild_id}/bans/{user_id}")
+            ok = r.ok
+            error = None if ok else f"HTTP {r.status_code}: {r.text[:200]}"
+
+        elif tool_name == "timeout_member":
+            minutes = max(1, min(40320, int(args.get("minutes", 10) or 10)))
+            until = (datetime.utcnow() + timedelta(minutes=minutes)).isoformat() + "Z"
+            r = discord_api(
+                "PATCH", f"/guilds/{guild_id}/members/{user_id}",
+                reason=reason, json={"communication_disabled_until": until},
+            )
+            ok = r.ok
+            error = None if ok else f"HTTP {r.status_code}: {r.text[:200]}"
+            detail = f"{minutes}m — {reason}"
+
+        elif tool_name == "remove_timeout":
+            r = discord_api(
+                "PATCH", f"/guilds/{guild_id}/members/{user_id}",
+                json={"communication_disabled_until": None},
+            )
+            ok = r.ok
+            error = None if ok else f"HTTP {r.status_code}: {r.text[:200]}"
+
+        elif tool_name in ("add_role", "remove_role"):
+            role_id = args.get("role_id")
+            method = "PUT" if tool_name == "add_role" else "DELETE"
+            r = discord_api(method, f"/guilds/{guild_id}/members/{user_id}/roles/{role_id}")
+            ok = r.ok
+            error = None if ok else f"HTTP {r.status_code}: {r.text[:200]}"
+            detail = f"role {role_id}"
+
+        elif tool_name == "send_message":
+            channel_id = args.get("channel_id")
+            content = (args.get("content") or "").strip()[:2000]
+            r = discord_api("POST", f"/channels/{channel_id}/messages", json={"content": content})
+            ok = r.ok
+            error = None if ok else f"HTTP {r.status_code}: {r.text[:200]}"
+            detail = f"channel #{channel_id}: {content[:80]}"
+
+        elif tool_name == "dm_user":
+            content = (args.get("content") or "").strip()[:2000]
+            dm = discord_api("POST", "/users/@me/channels", json={"recipient_id": user_id})
+            if not dm.ok:
+                ok, error = False, f"HTTP {dm.status_code}: {dm.text[:200]}"
+            else:
+                dm_channel_id = dm.json()["id"]
+                r = discord_api("POST", f"/channels/{dm_channel_id}/messages", json={"content": content})
+                ok = r.ok
+                error = None if ok else f"HTTP {r.status_code}: {r.text[:200]}"
+            detail = content[:80]
+
+        else:
+            error = "Unknown action."
+
+    except Exception as e:
+        logger.error(f"_run_destructive_tool '{tool_name}' failed: {e}")
+        ok, error = False, str(e)[:300]
+
+    return ok, error, detail
+
+
+def run_agent_turn(
+    guild_id: int,
+    history: list,
+    user_message: str,
+    discord_api,
+    db,
+    auto_execute: bool = False,
+    log_action=None,
+):
     """
     Runs one user turn to completion: repeatedly calls Groq, executing any
-    read-only tool calls automatically, until the model either answers in
-    plain text or proposes a destructive tool call.
+    read-only tool calls automatically.
+
+    - auto_execute=False (default; used by any confirm-first caller):
+      stops and returns a "pending_action" the first time the model wants
+      to call a destructive tool, without running it.
+    - auto_execute=True (used by trusted-staff Discord chat, which already
+      gated the whole request on the Trusted Staff role): destructive tools
+      are executed immediately via discord_api, their result is fed back to
+      the model, and the loop continues — no separate confirmation step.
+      If log_action(tool_name, args, ok, error, detail) is given, it's
+      called after each auto-executed action for audit logging.
 
     Returns:
       {
-        "reply": str,                 # text to show the user
-        "history": list,              # updated message history to persist client-side
-        "pending_action": dict | None # {"tool": name, "args": {...}, "description": str} if confirmation needed
+        "reply": str,
+        "history": list,
+        "pending_action": dict | None   # only ever set when auto_execute=False
       }
     """
     messages = [{"role": "system", "content": SYSTEM_PROMPT}] + history + [
@@ -419,7 +525,6 @@ def run_agent_turn(guild_id: int, history: list, user_message: str, discord_api,
             reply = choice.get("content") or "..."
             return {"reply": reply, "history": messages[1:], "pending_action": None}
 
-        # Handle the first tool call. If it's destructive, stop and ask for confirmation.
         for call in tool_calls:
             name = call["function"]["name"]
             try:
@@ -427,7 +532,7 @@ def run_agent_turn(guild_id: int, history: list, user_message: str, discord_api,
             except json.JSONDecodeError:
                 args = {}
 
-            if name in DESTRUCTIVE_TOOLS:
+            if name in DESTRUCTIVE_TOOLS and not auto_execute:
                 pending = {
                     "tool": name,
                     "args": args,
@@ -436,7 +541,17 @@ def run_agent_turn(guild_id: int, history: list, user_message: str, discord_api,
                 reply = choice.get("content") or f"I'd like to: {pending['description']}"
                 return {"reply": reply, "history": messages[1:], "pending_action": pending}
 
-            result = _run_read_only_tool(name, args, guild_id, discord_api, db)
+            if name in DESTRUCTIVE_TOOLS:  # auto_execute is True here
+                ok, error, detail = _run_destructive_tool(name, args, guild_id, discord_api)
+                if log_action:
+                    try:
+                        log_action(name, args, ok, error, detail)
+                    except Exception as e:
+                        logger.error(f"log_action callback failed: {e}")
+                result = {"ok": ok, "error": error} if not ok else {"ok": True, "detail": detail}
+            else:
+                result = _run_read_only_tool(name, args, guild_id, discord_api, db)
+
             messages.append({
                 "role": "tool",
                 "tool_call_id": call["id"],

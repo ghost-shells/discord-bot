@@ -1,17 +1,23 @@
 """
 cogs/ai_chat.py
 
-Casual conversational AI — separate from the dashboard's AI Admin Agent.
+Conversational AI in Discord.
 
 Triggers when:
   - Someone @mentions the bot directly (not @everyone/@here), or
   - Someone replies to a message the bot sent
 
-Uses the same free GROQ_API_KEY as the dashboard agent (via ai_agent.py's
-simple_chat helper), but with NO tool access — it can only talk, never
-moderate or take actions. Keeps a short rolling per-channel memory so
-back-and-forth conversation feels continuous, but nothing is persisted
-to Mongo (resets on bot restart, and that's fine for casual chat).
+Two modes, based on the message author's roles:
+  - Regular members: casual chat only (ai_agent.simple_chat), no tool access.
+  - Trusted Staff (the role configured on the dashboard, TRUSTED_STAFF_ROLE_ID)
+    or Administrators: full tool access via ai_agent.run_agent_turn with
+    auto_execute=True — "@bot mute jake for 10 minutes for spamming" actually
+    does it, no dashboard confirm step, because the role check already is
+    the authorization.
+
+Uses the same free GROQ_API_KEY as everything else. Every auto-executed
+action is logged to the same `console_actions` collection the dashboard
+console writes to, so it shows up in Recent Console Actions there too.
 """
 
 import discord
@@ -19,6 +25,8 @@ from discord.ext import commands
 from datetime import datetime, timezone
 
 import ai_agent
+from app import _discord_api
+from cogs.config import get_guild_config, member_has_role_id
 
 MAX_HISTORY_TURNS = 6       # user+assistant pairs kept per channel
 COOLDOWN_SECONDS = 4        # per-user, to avoid spam/rate-limit issues
@@ -72,6 +80,35 @@ class AIChat(commands.Cog):
         except (discord.NotFound, discord.Forbidden, discord.HTTPException):
             return False
 
+    def _is_trusted(self, member: discord.Member) -> bool:
+        if member.guild_permissions.administrator:
+            return True
+        if self.bot.db is None:
+            return False
+        cfg = get_guild_config(self.bot.db, member.guild.id)
+        return member_has_role_id(member, cfg.get("TRUSTED_STAFF_ROLE_ID"))
+
+    def _log_action(self, guild_id: int, actor: discord.Member):
+        def _log(tool_name, args, ok, error, detail):
+            if self.bot.db is None:
+                return
+            target = str(args.get("user_id") or args.get("channel_id") or "")
+            try:
+                self.bot.db["console_actions"].insert_one({
+                    "guild_id": guild_id,
+                    "action": f"aichat_{tool_name}",
+                    "target_id": target,
+                    "detail": detail,
+                    "ok": ok,
+                    "error": error,
+                    "actor_id": str(actor.id),
+                    "actor_name": str(actor),
+                    "timestamp": datetime.utcnow(),
+                })
+            except Exception as e:
+                print(f"❌ AIChat: failed to log console action: {e}")
+        return _log
+
     # ── Listener ─────────────────────────────────────────────────────────
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
@@ -98,19 +135,34 @@ class AIChat(commands.Cog):
 
         channel_id = message.channel.id
         history = self._get_history(channel_id)
-
-        system_prompt = SYSTEM_PROMPT_TEMPLATE.format(
-            bot_name=self.bot.user.display_name, guild_name=message.guild.name
-        )
-        messages = (
-            [{"role": "system", "content": system_prompt}]
-            + history
-            + [{"role": "user", "content": f"{message.author.display_name}: {content}"}]
-        )
+        trusted = self._is_trusted(message.author)
 
         try:
             async with message.channel.typing():
-                reply = await self.bot.loop.run_in_executor(None, ai_agent.simple_chat, messages)
+                if trusted:
+                    result = await self.bot.loop.run_in_executor(
+                        None,
+                        lambda: ai_agent.run_agent_turn(
+                            message.guild.id,
+                            history,
+                            f"{message.author.display_name} (trusted staff): {content}",
+                            _discord_api,
+                            self.bot.db,
+                            auto_execute=True,
+                            log_action=self._log_action(message.guild.id, message.author),
+                        ),
+                    )
+                    reply = result["reply"]
+                else:
+                    system_prompt = SYSTEM_PROMPT_TEMPLATE.format(
+                        bot_name=self.bot.user.display_name, guild_name=message.guild.name
+                    )
+                    messages = (
+                        [{"role": "system", "content": system_prompt}]
+                        + history
+                        + [{"role": "user", "content": f"{message.author.display_name}: {content}"}]
+                    )
+                    reply = await self.bot.loop.run_in_executor(None, ai_agent.simple_chat, messages)
         except Exception as e:
             print(f"❌ AIChat: Groq call failed: {e}")
             return
